@@ -3677,7 +3677,7 @@ INNER JOIN civicrm_activity ON civicrm_activity_contact.activity_id = civicrm_ac
     if (!empty($participantPayments) && empty($input['IAmAHorribleNastyBeyondExcusableHackInTheCRMEventFORMTaskClassThatNeedsToBERemoved']) && !$disableActionsOnCompleteOrder) {
       foreach ($participantPayments as $participantPayment) {
         $participantParams['id'] = $participantPayment['participant_id'];
-        $participantParams['status_id'] = 'Registered';
+        //$participantParams['status_id'] = 'Registered';
         civicrm_api3('Participant', 'create', $participantParams);
       }
     }
