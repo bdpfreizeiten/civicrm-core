@@ -198,6 +198,9 @@
         }
         // correct the value type
         if (ctrl.defn.input_type !== 'DisplayOnly') {
+          if (_.isString(value) && ctrl.isMultiple() && ctrl.defn.data_type === 'Integer'){
+            value = value.split(',');
+          }
           value = correctValueType(value, ctrl.defn.data_type);
         }
 
