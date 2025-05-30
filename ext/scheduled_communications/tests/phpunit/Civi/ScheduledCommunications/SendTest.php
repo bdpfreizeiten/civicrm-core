@@ -5,7 +5,7 @@ use CRM_ScheduledCommunications_ExtensionUtil as E;
 use Civi\Api4\Activity;
 use Civi\Test\CiviEnvBuilder;
 use Civi\Test\HeadlessInterface;
-use Civi\Test\HookInterface;
+use Civi\Core\HookInterface;
 use Civi\Test\TransactionalInterface;
 
 /**
@@ -27,6 +27,11 @@ class SendTest extends \PHPUnit\Framework\TestCase implements HeadlessInterface,
     parent::setUp();
 
     $this->mut = new \CiviMailUtils($this, TRUE);
+  }
+
+  public function tearDown(): void {
+    \CRM_Utils_Time::resetTime();
+    parent::tearDown();
   }
 
   public function setUpHeadless(): CiviEnvBuilder {

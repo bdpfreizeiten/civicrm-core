@@ -47,6 +47,7 @@ return [
       'input_type' => 'EntityRef',
       'description' => ts('FK to contact table.'),
       'add' => '5.50',
+      'default_callback' => ['CRM_Core_Session', 'getLoggedInContactID'],
       'input_attrs' => [
         'label' => ts('Created By'),
       ],
@@ -110,7 +111,7 @@ return [
         'label' => ts('Job Status'),
       ],
       'pseudoconstant' => [
-        'callback' => 'CRM_Core_BAO_UserJob::getStatuses',
+        'callback' => ['CRM_Core_BAO_UserJob', 'getStatuses'],
       ],
     ],
     'job_type' => [
@@ -124,7 +125,7 @@ return [
         'label' => ts('Job Type'),
       ],
       'pseudoconstant' => [
-        'callback' => 'CRM_Core_BAO_UserJob::getTypes',
+        'callback' => ['CRM_Core_BAO_UserJob', 'getTypes'],
         'suffixes' => [
           'name',
           'label',
@@ -144,6 +145,22 @@ return [
         'entity' => 'Queue',
         'key' => 'id',
         'on_delete' => 'SET NULL',
+      ],
+    ],
+    'search_display_id' => [
+      'title' => ts('SearchDisplay ID'),
+      'sql_type' => 'int unsigned',
+      'input_type' => 'EntityRef',
+      'description' => ts('Batch import search display'),
+      'input_attrs' => [
+        'label' => ts('Search Display'),
+      ],
+      'entity_reference' => [
+        'entity' => 'SearchDisplay',
+        'key' => 'id',
+        // Core tables get created before extension tables, so a FK constraint
+        // can't be added to this column.
+        'fk' => FALSE,
       ],
     ],
     'metadata' => [

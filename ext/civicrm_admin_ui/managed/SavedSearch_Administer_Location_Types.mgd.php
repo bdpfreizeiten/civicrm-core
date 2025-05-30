@@ -59,6 +59,7 @@ return [
           'classes' => [
             'table',
             'table-striped',
+            'crm-sticky-header',
           ],
           'pager' => [
             'show_count' => TRUE,
@@ -119,6 +120,14 @@ return [
               'dataType' => 'Boolean',
               'label' => E::ts('Default'),
               'sortable' => TRUE,
+              'rewrite' => '[none]',
+              'icons' => [
+                [
+                  'icon' => 'fa-check',
+                  'side' => 'left',
+                  'if' => ['is_default', '=', TRUE],
+                ],
+              ],
             ],
             [
               'size' => 'btn-xs',

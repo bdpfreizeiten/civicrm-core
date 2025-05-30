@@ -55,7 +55,7 @@ class api_v3_ContactTest extends CiviUnitTestCase {
    *
    * @var string
    */
-  protected $entity = 'Contact';
+  protected string $entity = 'Contact';
 
   /**
    * Test setup for every test.
@@ -613,13 +613,23 @@ class api_v3_ContactTest extends CiviUnitTestCase {
 
     // Disallow edit -- because we don't have permission
     $config->userPermissionClass->permissions = ['access CiviCRM', 'edit all contacts'];
-    $result = $this->callAPIFailure('Contact', 'create', [
-      'check_permissions' => 1,
-      'id' => $contactId,
-      'api_key' => 'defg4321',
-    ]);
-    $this->assertMatchesRegularExpression(';Permission denied to modify api key;', $result['error_message']);
-
+    if ($version === 3) {
+      $result = $this->callAPIFailure('Contact', 'create', [
+        'check_permissions' => 1,
+        'id' => $contactId,
+        'api_key' => 'defg4321',
+      ]);
+      $this->assertMatchesRegularExpression(';Permission denied to modify api key;', $result['error_message']);
+    }
+    else {
+      $this->callAPISuccess('Contact', 'create', [
+        'check_permissions' => 1,
+        'id' => $contactId,
+        'api_key' => 'defg4321',
+      ]);
+      $this->callAPISuccess('Contact', 'get', ['id' => $contactId]);
+      $this->assertEquals('abcd1234', CRM_Core_DAO::singleValueQuery(' SELECT api_key FROM civicrm_contact WHERE id = ' . $contactId));
+    }
     // Return everything -- because permissions are not being checked
     $config->userPermissionClass->permissions = [];
     $result = $this->callAPISuccess('Contact', 'create', [
@@ -1315,6 +1325,26 @@ class api_v3_ContactTest extends CiviUnitTestCase {
     $this->customGroupDelete($ids['custom_group_id']);
   }
 
+  public function testGetOptions(): void {
+    $options = $this->callAPISuccess($this->_entity, 'getoptions', ['field' => 'worldregion_id']);
+    $this->assertContains('Europe and Central Asia', $options['values']);
+
+    $options = $this->callAPISuccess($this->_entity, 'getoptions', ['field' => 'country']);
+    $this->assertContains('France', $options['values']);
+
+    $options = $this->callAPISuccess($this->_entity, 'getoptions', ['field' => 'state_province']);
+    $this->assertContains('Alaska', $options['values']);
+  }
+
+  public function testGetOptionsWithCustom(): void {
+    $this->createCustomGroupWithFieldOfType(['extends' => $this->entity], 'select', 'foo');
+    $this->callAPISuccess('CustomField', 'create', ['id' => $this->ids['CustomField']['fooselect'], 'is_active' => 0]);
+    $options = $this->callAPISuccess($this->entity, 'getoptions', ['field' => 'custom_' . $this->ids['CustomField']['fooselect']]);
+    $this->callAPISuccess('CustomField', 'create', ['id' => $this->ids['CustomField']['fooselect'], 'is_active' => 1]);
+    $options = $this->callAPISuccess($this->entity, 'getoptions', ['field' => 'custom_' . $this->ids['CustomField']['fooselect']]);
+    $this->assertEquals(['R' => 'Red', 'Y' => 'Yellow', 'G' => 'Green'], $options['values']);
+  }
+
   /**
    * Tests that using 'return' with a custom field not of type contact does not inappropriately filter.
    *
@@ -1535,7 +1565,6 @@ class api_v3_ContactTest extends CiviUnitTestCase {
    * https://issues.civicrm.org/jira/browse/CRM-16084
    * @param int $version
    *
-   * @throws \CRM_Core_Exception
    * @dataProvider versionThreeAndFour
    */
   public function testDirectionChainingRelationshipsCRM16084(int $version): void {
@@ -4766,7 +4795,7 @@ class api_v3_ContactTest extends CiviUnitTestCase {
    * @throws \CRM_Core_Exception
    * @throws \Civi\API\Exception\UnauthorizedException
    */
-  protected function validateContactField(string $fieldName, $expected, ?int $contactID, array $criteria = NULL): void {
+  protected function validateContactField(string $fieldName, $expected, ?int $contactID, ?array $criteria = NULL): void {
     $api = Contact::get()->addSelect($fieldName);
     if ($criteria) {
       $api->setWhere([$criteria]);

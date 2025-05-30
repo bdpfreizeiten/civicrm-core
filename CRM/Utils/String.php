@@ -108,7 +108,9 @@ class CRM_Utils_String {
    * @return string
    */
   public static function convertStringToSnakeCase(string $str): string {
-    return strtolower(ltrim(preg_replace('/(?=[A-Z])/', '_$0', $str), '_'));
+    // Use regular expression to replace uppercase with underscore + lowercase, avoiding duplicates
+    $str = preg_replace('/(?<!^|_)(?=[A-Z])/', '_', $str);
+    return strtolower($str);
   }
 
   /**
@@ -465,7 +467,7 @@ class CRM_Utils_String {
     $name = str_replace('\'', '', $name);
 
     // check for comma in name
-    if (strpos($name, ',') !== FALSE) {
+    if (str_contains($name, ',')) {
 
       // name has a comma - assume lname, fname [mname]
       $names = explode(',', $name);
@@ -642,7 +644,12 @@ class CRM_Utils_String {
       $config->set('Cache.DefinitionImpl', NULL);
       $config->set('HTML.DefinitionID', 'enduser-customize.html tutorial');
       $config->set('HTML.DefinitionRev', 1);
+      $config->set('HTML.MaxImgLength', NULL);
+      $config->set('CSS.MaxImgLength', NULL);
       $def = $config->maybeGetRawHTMLDefinition();
+      $uri = $config->getDefinition('URI');
+      $uri->addFilter(new CRM_Utils_HTMLPurifier_URIFilter(), $config);
+
       if (!empty($def)) {
         $def->addElement('figcaption', 'Block', 'Flow', 'Common');
         $def->addElement('figure', 'Block', 'Optional: (figcaption, Flow) | (Flow, figcaption) | Flow', 'Common');
@@ -993,7 +1000,7 @@ class CRM_Utils_String {
    * @return bool
    */
   public static function stringContainsTokens(string $string) {
-    return strpos($string, '{') !== FALSE;
+    return str_contains($string, '{');
   }
 
   /**
@@ -1110,6 +1117,23 @@ class CRM_Utils_String {
       }
     }
     return $tokens;
+  }
+
+  public static function isQuotedString($value): bool {
+    return is_string($value) && strlen($value) > 1 && $value[0] === $value[-1] && in_array($value[0], ['"', "'"]);
+  }
+
+  public static function unquoteString(string $string): string {
+    // Strip the outer quotes if the string starts and ends with the same quote type
+    if (self::isQuotedString($string)) {
+      $string = substr($string, 1, -1);
+
+      // Replace escaped quotes with unescaped quotes, avoiding escaped backslashes
+      $string = preg_replace('/(?<!\\\\)\\\\\\"/', '"', $string);
+      $string = preg_replace('/(?<!\\\\)\\\\\\\'/', "'", $string);
+    }
+
+    return $string;
   }
 
 }

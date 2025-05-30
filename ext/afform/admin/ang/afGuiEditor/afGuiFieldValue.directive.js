@@ -26,7 +26,7 @@
             if (typeof value === 'boolean') {
               return value ? '1' : '0';
             }
-            return value;
+            return '' + value;
           }
           ctrls.ngModel.$formatters.push(formatViewValue);
         }
@@ -48,9 +48,12 @@
           // Decide whether the input should be multivalued
           if (ctrl.op) {
             multi = ['IN', 'NOT IN'].includes(ctrl.op);
-          } else if (inputType) {
-            multi = (dataType !== 'Boolean' &&
-              (inputType === 'CheckBox' || (field.input_attrs && field.input_attrs.multiple)));
+          } else if (inputType && dataType !== 'Boolean') {
+            multi = (inputType === 'CheckBox' || (field.input_attrs && field.input_attrs.multiple));
+            // Hidden fields are multi-select if the original input type is.
+            if (inputType === 'Hidden' || inputType === 'DisplayOnly') {
+              multi = _.contains(['CheckBox', 'Radio', 'Select'], field.original_input_type);
+            }
           } else {
             multi = field.serialize || dataType === 'Array';
           }
@@ -92,7 +95,7 @@
               }, []);
               $el.select2({data: options, multiple: multi, separator: '\u0001'});
             } else if (dataType === 'Boolean') {
-              $el.attr('placeholder', ts('- select -')).crmSelect2({allowClear: false, multiple: multi, separator: '\u0001', placeholder: ts('- select -'), data: [
+              $el.attr('placeholder', ts('- select -')).crmSelect2({allowClear: false, separator: '\u0001', placeholder: ts('- select -'), data: [
                   {id: '1', text: ts('Yes')},
                   {id: '0', text: ts('No')}
                 ]});
@@ -110,11 +113,19 @@
           if (ctrl.field) {
             dataType = ctrl.field.data_type;
           }
+          else {
+            dataType = null;
+          }
         }
 
         function convertDataType(val) {
-          if (dataType === 'Integer') {
-            return +val;
+          if (dataType === 'Integer' || dataType === 'Float') {
+            let newVal = Number(val);
+            // FK Entities can use a mix of numeric & string values (see `"static": options` above)
+            if (ctrl.field.fk_entity && ('' + newVal) !== val) {
+              return val;
+            }
+            return newVal;
           }
           return val;
         }

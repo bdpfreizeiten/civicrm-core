@@ -613,16 +613,7 @@ WHERE li.contribution_id = %1";
 
     $lineItemObj->addLineItemOnChangeFeeSelection($requiredChanges['line_items_to_add'], $entityID, $entityTable, $contributionId);
 
-    $count = 0;
-    if ($entity == 'participant') {
-      $count = count(CRM_Event_BAO_Participant::getParticipantIds($contributionId));
-    }
-    else {
-      $count = CRM_Utils_Array::value('count', civicrm_api3('MembershipPayment', 'getcount', ['contribution_id' => $contributionId]));
-    }
-    if ($count > 1) {
-      $updatedAmount = CRM_Price_BAO_LineItem::getLineTotal($contributionId);
-    }
+    $updatedAmount = CRM_Price_BAO_LineItem::getLineTotal($contributionId);
     $displayParticipantCount = '';
     if ($totalParticipant > 0) {
       $displayParticipantCount = ' Participant Count -' . $totalParticipant;
@@ -1215,7 +1206,7 @@ WHERE li.contribution_id = %1";
    * @param array $conditions
    * @inheritDoc
    */
-  public function addSelectWhereClause(string $entityName = NULL, int $userId = NULL, array $conditions = []): array {
+  public function addSelectWhereClause(?string $entityName = NULL, ?int $userId = NULL, array $conditions = []): array {
     $clauses['contribution_id'] = CRM_Utils_SQL::mergeSubquery('Contribution');
     CRM_Utils_Hook::selectWhereClause($this, $clauses, $userId, $conditions);
     return $clauses;

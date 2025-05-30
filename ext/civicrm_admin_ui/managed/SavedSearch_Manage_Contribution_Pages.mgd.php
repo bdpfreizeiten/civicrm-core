@@ -61,6 +61,7 @@ return [
           'classes' => [
             'table',
             'table-striped',
+            'crm-sticky-header',
           ],
           'pager' => [
             'show_count' => TRUE,
@@ -113,7 +114,7 @@ return [
               'type' => 'field',
               'key' => 'is_active',
               'dataType' => 'Boolean',
-              'label' => E::ts('Enabled?'),
+              'label' => E::ts('Enabled'),
               'sortable' => TRUE,
               'editable' => TRUE,
               'cssRules' => [
@@ -154,7 +155,7 @@ return [
                   'icon' => 'fa-external-link',
                   'text' => E::ts('Live Page'),
                   'style' => 'default',
-                  'path' => 'civicrm/contribute/transact?reset=1&id=[id]',
+                  'path' => 'frontend://civicrm/contribute/transact?reset=1&id=[id]',
                   'condition' => [],
                 ],
                 [
@@ -165,7 +166,7 @@ return [
                   'icon' => 'fa-external-link',
                   'text' => E::ts('Test-drive'),
                   'style' => 'default',
-                  'path' => 'civicrm/contribute/transact?reset=1&id=[id]&action=preview',
+                  'path' => 'frontend://civicrm/contribute/transact?reset=1&id=[id]&action=preview',
                   'condition' => [],
                 ],
               ],
@@ -183,7 +184,7 @@ return [
                   'icon' => 'fa-search',
                   'text' => E::ts('Find Contributions'),
                   'style' => 'default',
-                  'path' => 'civicrm/contribute/search?contribution_page_id=[id]&force=1&reset=1',
+                  'path' => 'frontend://civicrm/contribute/search?contribution_page_id=[id]&force=1&reset=1',
                   'condition' => [],
                 ],
               ],
@@ -206,6 +207,7 @@ return [
                 ],
                 [
                   'path' => 'civicrm/admin/contribute/manage?action=copy&gid=[id]',
+                  'csrf' => 'qfKey',
                   'icon' => 'fa-clone',
                   'text' => E::ts('Clone'),
                   'style' => 'secondary',

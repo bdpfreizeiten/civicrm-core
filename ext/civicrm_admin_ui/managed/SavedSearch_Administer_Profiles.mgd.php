@@ -73,6 +73,7 @@ return [
           'classes' => [
             'table',
             'table-striped',
+            'crm-sticky-header',
           ],
           'pager' => [
             'show_count' => TRUE,
@@ -142,7 +143,7 @@ return [
               'dataType' => 'Boolean',
               'label' => E::ts('Reserved'),
               'sortable' => TRUE,
-              'rewrite' => ' ',
+              'rewrite' => '[none]',
               'icons' => [
                 [
                   'icon' => 'fa-lock',
@@ -196,7 +197,7 @@ return [
                   'icon' => 'fa-eye',
                 ],
                 [
-                  'path' => 'civicrm/profile/create?gid=[id]&reset=1',
+                  'path' => 'frontend://civicrm/profile/create?gid=[id]&reset=1',
                   'icon' => 'fa-external-link',
                   'text' => E::ts('Use - Create Mode'),
                   'style' => 'default',
@@ -207,7 +208,7 @@ return [
                   'target' => '_blank',
                 ],
                 [
-                  'path' => 'civicrm/profile/edit?gid=[id]&reset=1',
+                  'path' => 'frontend://civicrm/profile/edit?gid=[id]&reset=1',
                   'icon' => 'fa-external-link',
                   'text' => E::ts('Use - Edit Mode'),
                   'style' => 'default',
@@ -218,7 +219,7 @@ return [
                   'target' => '_blank',
                 ],
                 [
-                  'path' => 'civicrm/profile?gid=[id]&reset=1',
+                  'path' => 'frontend://civicrm/profile?gid=[id]&reset=1',
                   'icon' => 'fa-external-link',
                   'text' => E::ts('Use - Listing Mode'),
                   'style' => 'default',
@@ -253,6 +254,7 @@ return [
                   'condition' => [],
                   'entity' => 'UFGroup',
                   'action' => 'copy',
+                  'csrf' => 'qfKey',
                   'join' => '',
                   'target' => '',
                 ],

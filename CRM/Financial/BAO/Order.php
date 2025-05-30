@@ -220,6 +220,18 @@ class CRM_Financial_BAO_Order {
   protected $overrideTotalAmount;
 
   /**
+   * Override for the total amount of the order exclusive of tax.
+   *
+   * We set this when that is what is known by the form, in order to 'prefer'
+   * the raw form when it comes to forwards / backwards calculations.
+   *
+   * When there is a single line item the order total may be overriden.
+   *
+   * @var float|null
+   */
+  protected ?float $overrideTotalAmountTaxExclusive = NULL;
+
+  /**
    * Line items in the order.
    *
    * @var array
@@ -359,6 +371,7 @@ class CRM_Financial_BAO_Order {
       'OverrideTotalAmount' => $this->getOverrideTotalAmount(),
       'OverrideFinancialType' => $this->getOverrideFinancialTypeID(),
       'PriceSelection' => $this->getPriceSelection(),
+      'OverrideTotalAmountTaxExclusive' => $this->getOverrideTotalAmountTaxExclusive(),
     ];
   }
 
@@ -377,7 +390,7 @@ class CRM_Financial_BAO_Order {
   /**
    * Form object - if present the buildAmount hook will be called.
    *
-   * @var \CRM_Member_Form_Membership|\CRM_Member_Form_MembershipRenewal
+   * @var \CRM_Member_Form_Membership|\CRM_Member_Form_MembershipRenewal|\CRM_Contribute_Form_Contribution
    */
   protected $form;
 
@@ -429,6 +442,18 @@ class CRM_Financial_BAO_Order {
    */
   public function setOverrideTotalAmount(?float $overrideTotalAmount): void {
     $this->overrideTotalAmount = $overrideTotalAmount;
+  }
+
+  public function setOverrideTotalAmountTaxExclusive(float $overrideTotalAmountTaxExclusive): void {
+    $this->overrideTotalAmountTaxExclusive = $overrideTotalAmountTaxExclusive;
+    if ($this->getOverrideFinancialTypeID()) {
+      $taxRate = $this->getTaxRate($this->getOverrideFinancialTypeID());
+      $this->setOverrideTotalAmount($overrideTotalAmountTaxExclusive + ($overrideTotalAmountTaxExclusive * $taxRate));
+    }
+  }
+
+  public function getOverrideTotalAmountTaxExclusive(): ?float {
+    return $this->overrideTotalAmountTaxExclusive;
   }
 
   /**
@@ -766,7 +791,7 @@ class CRM_Financial_BAO_Order {
    */
   public function setPriceSelectionFromUnfilteredInput(array $input): void {
     foreach ($input as $fieldName => $value) {
-      if (strpos($fieldName, 'price_') === 0) {
+      if (str_starts_with($fieldName, 'price_')) {
         $fieldID = substr($fieldName, 6);
         if (is_numeric($fieldID)) {
           $this->priceSelection[$fieldName] = $value;
@@ -892,6 +917,24 @@ class CRM_Financial_BAO_Order {
       }
       if (empty($line['membership_num_terms'])) {
         $lines[$index]['membership_num_terms'] = 1;
+      }
+    }
+    return $lines;
+  }
+
+  /**
+   * Get line items that specifically relate to participants.
+   *
+   * return array
+   *
+   * @throws \CRM_Core_Exception
+   */
+  public function getParticipantLineItems():array {
+    $lines = $this->getLineItems();
+    foreach ($lines as $index => $line) {
+      if ($line['entity_table'] !== 'civicrm_participant') {
+        unset($lines[$index]);
+        continue;
       }
     }
     return $lines;
@@ -1309,11 +1352,21 @@ class CRM_Financial_BAO_Order {
     $lineItem['tax_rate'] = $taxRate = $this->getTaxRate($financialTypeID);
     if ($taxRate) {
       // Total is tax inclusive.
-      $lineItem['tax_amount'] = ($taxRate / 100) * $this->getOverrideTotalAmount() / (1 + ($taxRate / 100));
-      $lineItem['line_total'] = $this->getOverrideTotalAmount() - $lineItem['tax_amount'];
+      $taxExclusiveAmount = $this->getOverrideTotalAmountTaxExclusive();
+      if ($taxExclusiveAmount) {
+        $lineItem['line_total'] = $taxExclusiveAmount;
+        $lineItem['tax_amount'] = ($taxRate / 100) * $taxExclusiveAmount;
+        // Set to 1 for consistency with historical behaviour on the only form that calls this section.
+        // There may be a case to set unit_price to 1 & qty to x
+        $lineItem['qty'] = 1;
+      }
+      else {
+        $lineItem['tax_amount'] = ($taxRate / 100) * $this->getOverrideTotalAmount() / (1 + ($taxRate / 100));
+        $lineItem['line_total'] = $this->getOverrideTotalAmount() - $lineItem['tax_amount'];
+      }
     }
     else {
-      $lineItem['line_total'] = $this->getOverrideTotalAmount();
+      $lineItem['line_total'] = $this->getOverrideTotalAmountTaxExclusive() ?: $this->getOverrideTotalAmount();
       $lineItem['tax_amount'] = 0.0;
       $lineItem['line_total_inclusive'] = $lineItem['line_total'];
     }

@@ -60,6 +60,7 @@ return [
           'classes' => [
             'table',
             'table-striped',
+            'crm-sticky-header',
           ],
           'pager' => [
             'show_count' => TRUE,
@@ -75,6 +76,7 @@ return [
               'dataType' => 'String',
               'label' => E::ts('Field Name'),
               'sortable' => TRUE,
+              'editable' => TRUE,
             ],
             [
               'type' => 'field',
@@ -122,7 +124,7 @@ return [
               'dataType' => 'Boolean',
               'label' => E::ts('Reserved'),
               'sortable' => TRUE,
-              'rewrite' => ' ',
+              'rewrite' => '[none]',
               'icons' => [
                 [
                   'icon' => 'fa-lock',

@@ -19,27 +19,27 @@
         <td class="label">{$form.extends.label} {help id="id-extends"}</td>
         <td>
             {$form.extends.html}
-            <span class="{if $emptyEntityColumnId}hiddenElement{/if} field-extends_entity_column_id">{$form.extends_entity_column_id.html}</span>
-            <span class="{if $emptyEntityColumnValue}hiddenElement{/if} field-extends_entity_column_value">{$form.extends_entity_column_value.html}</span>
+            <span {if $emptyEntityColumnId}style="display:none"{/if} class="field-extends_entity_column_id">{$form.extends_entity_column_id.html}</span>
+            <span {if $emptyEntityColumnValue}style="display:none"{/if} class="field-extends_entity_column_value">{$form.extends_entity_column_value.html}</span>
         </td>
     </tr>
     <tr>
         <td class="label">{$form.weight.label} {help id="id-weight"}</td>
         <td>{$form.weight.html}</td>
     </tr>
-    <tr class="hiddenElement field-is_multiple">
+    <tr style="display:none" class="field-is_multiple">
         <td class="right">{help id="id-is_multiple"}</td>
         <td class="html-adjust">{$form.is_multiple.html}&nbsp;{$form.is_multiple.label}</td>
     </tr>
-    <tr class="hiddenElement field-max_multiple">
+    <tr style="display:none" class="field-max_multiple">
         <td class="label">{$form.max_multiple.label} {help id="id-max_multiple"}</td>
         <td>{$form.max_multiple.html}</td>
     </tr>
-    <tr class="hiddenElement field-style">
+    <tr style="display:none" class="field-style">
         <td class="label">{$form.style.label} {help id="id-display_style"}</td>
         <td>{$form.style.html}</td>
     </tr>
-    <tr class="hiddenElement field-icon">
+    <tr style="display:none" class="field-icon">
         <td class="label">{$form.icon.label}</td>
         <td>{$form.icon.html}</td>
     </tr>
@@ -83,7 +83,7 @@ CRM.$(function($) {
   const {/literal}
     $form = $('form.{$form.formClass}'),
     entityColumnIdOptions = {$entityColumnIdOptions|@json_encode},
-    allMultiple = {$allowMultiple|@json_encode},
+    allowMultiple = {$allowMultiple|@json_encode},
     defaultSubtypes = {$defaultSubtypes|@json_encode};
   {literal}
   let tabWithTableOption;
@@ -151,7 +151,7 @@ CRM.$(function($) {
 
   // When changing or initializing the primary `extends` field
   function handleExtends() {
-    let multiAllowed = $(this).val() && allMultiple[$(this).val()];
+    let multiAllowed = $(this).val() && allowMultiple[$(this).val()];
 
     if (multiAllowed) {
       $('tr.field-style, tr.field-is_multiple', $form).show();

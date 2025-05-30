@@ -82,6 +82,14 @@ return [
               'dataType' => 'Boolean',
               'label' => E::ts('Default'),
               'sortable' => TRUE,
+              'rewrite' => '[none]',
+              'icons' => [
+                [
+                  'icon' => 'fa-check',
+                  'side' => 'left',
+                  'if' => ['is_default', '=', TRUE],
+                ],
+              ],
             ],
             [
               'text' => '',
@@ -146,6 +154,7 @@ return [
           'classes' => [
             'table',
             'table-striped',
+            'crm-sticky-header',
           ],
           'draggable' => 'weight',
           'toolbar' => [

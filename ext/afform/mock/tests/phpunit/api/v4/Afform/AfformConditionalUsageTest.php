@@ -2,13 +2,14 @@
 namespace api\v4\Afform;
 
 use Civi\Api4\Afform;
+use Civi\Test\TransactionalInterface;
 
 /**
  * Test case for Afform with autocomplete.
  *
  * @group headless
  */
-class AfformConditionalUsageTest extends AfformUsageTestCase {
+class AfformConditionalUsageTest extends AfformUsageTestCase implements TransactionalInterface {
 
   /**
    * Required field based on text input
@@ -30,11 +31,11 @@ EOHTML;
     ]);
 
     // Conditional rule is that last_name is required
-    // IF first_name = A (case-sensitive) OR first_name CONTAINS "bc" (case-insensitive)
+    // IF first_name = a (case-insensitive) OR first_name CONTAINS "bc" (case-insensitive)
 
     // Conditional field shown: this will fail validation
     $submission = [
-      ['fields' => ['first_name' => 'A', 'last_name' => '']],
+      ['fields' => ['first_name' => 'a', 'last_name' => '']],
     ];
     try {
       Afform::submit()
@@ -62,7 +63,7 @@ EOHTML;
 
     // Conditional field hidden: this will pass validation
     $submission = [
-      ['fields' => ['first_name' => 'a', 'last_name' => '']],
+      ['fields' => ['first_name' => 'q', 'last_name' => '']],
     ];
     $result = Afform::submit()
       ->setName($this->formName)

@@ -390,7 +390,9 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
       $this->_state->setName($this->_name);
     }
     $this->_action = (int) $action;
-
+    $this->registerElementType('radio_with_div', 'CRM/Core/QuickForm/RadioWithDiv.php', 'CRM_Core_QuickForm_RadioWithDiv');
+    $this->registerElementType('group_with_div', 'CRM/Core/QuickForm/GroupWithDiv.php', 'CRM_Core_QuickForm_GroupWithDiv');
+    $this->registerElementType('advcheckbox_with_div', 'CRM/Core/QuickForm/AdvCheckBoxWithDiv.php', 'CRM_Core_QuickForm_AdvCheckBoxWithDiv');
     $this->registerRules();
 
     // let the constructor initialize this, should happen only once
@@ -454,6 +456,7 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
       'autocomplete',
       'validContact',
       'email',
+      'numberInternational',
     ];
 
     foreach ($rules as $rule) {
@@ -806,7 +809,6 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
     // our ensured variables get blown away, so we need to set them even if
     // it's already been initialized.
     self::$_template->ensureVariablesAreAssigned($this->expectedSmartyVariables);
-    self::$_template->addExpectedTabHeaderKeys();
     $this->_formBuilt = TRUE;
   }
 
@@ -916,7 +918,7 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
       }
 
       // hack - addGroup uses an array to express variable spacing, read from the last element
-      $spacing[] = CRM_Utils_Array::value('spacing', $button, self::ATTR_SPACING);
+      $spacing[] = $button['spacing'] ?? self::ATTR_SPACING;
     }
     $this->addGroup($prevnext, 'buttons', '', $spacing, FALSE);
   }
@@ -1172,7 +1174,7 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
       }
     }
     catch (\Civi\Payment\Exception\PaymentProcessorException $e) {
-      CRM_Core_Error::statusBounce(ts('Payment approval failed with message :') . $e->getMessage(), $payment->getCancelUrl($params['qfKey'], CRM_Utils_Array::value('participant_id', $params)));
+      CRM_Core_Error::statusBounce(ts('Payment approval failed with message :') . $e->getMessage(), $payment->getCancelUrl($params['qfKey'], $params['participant_id'] ?? NULL));
     }
 
     $this->set('pre_approval_parameters', $result['pre_approval_parameters']);
@@ -1494,10 +1496,16 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
       if ($required) {
         $optAttributes['class'] .= ' required';
       }
-      $element = $this->createElement('radio', NULL, NULL, $var, $key, $optAttributes);
+      $element = $this->createElement('radio_with_div', NULL, NULL, $var, $key, $optAttributes);
       $options[] = $element;
     }
-    $group = $this->addGroup($options, $name, $title, $separator);
+    if (!empty($attributes['options_per_line'])) {
+      $group = $this->addElement('group_with_div', $name, $title, $options, $separator, TRUE);
+      $group->setAttribute('options_per_line', $attributes['options_per_line']);
+    }
+    else {
+      $group = $this->addGroup($options, $name, $title, $separator);
+    }
 
     $optionEditKey = 'data-option-edit-path';
     if (!empty($attributes[$optionEditKey])) {
@@ -1688,7 +1696,7 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
       $label,
       $options,
       $required,
-      ['class' => 'crm-select2']
+      ['class' => 'crm-select2', 'title' => $label]
     );
     $attributes = ['formatType' => 'searchDate'];
     $extra = ['time' => $isDateTime];
@@ -1780,7 +1788,7 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
       $props['placeholder'] = $placeholder;
     }
     // Handle custom field
-    if (strpos($name, 'custom_') === 0 && is_numeric($name[7])) {
+    if (str_starts_with($name, 'custom_') && is_numeric($name[7])) {
       [, $id] = explode('_', $name);
       $label = $props['label'] ?? CRM_Core_DAO::getFieldValue('CRM_Core_DAO_CustomField', 'label', $id);
       $gid = CRM_Core_DAO::getFieldValue('CRM_Core_DAO_CustomField', 'option_group_id', $id);
@@ -1795,7 +1803,7 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
         if (
           $uniqueName === $props['field'] ||
           ($fieldSpec['name'] ?? NULL) === $props['field'] ||
-          in_array($props['field'], CRM_Utils_Array::value('api.aliases', $fieldSpec, []))
+          in_array($props['field'], $fieldSpec['api.aliases'] ?? [])
         ) {
           break;
         }
@@ -1889,9 +1897,9 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
     }
 
     // Handle custom fields
-    if (strpos($name, 'custom_') === 0 && is_numeric($name[7])) {
+    if (str_starts_with($name, 'custom_') && is_numeric($name[7])) {
       $fieldId = (int) substr($name, 7);
-      return CRM_Core_BAO_CustomField::addQuickFormElement($this, $name, $fieldId, $required, $context == 'search', CRM_Utils_Array::value('label', $props));
+      return CRM_Core_BAO_CustomField::addQuickFormElement($this, $name, $fieldId, $required, $context == 'search', $props['label'] ?? NULL);
     }
 
     // Core field - get metadata.
@@ -2009,7 +2017,7 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
 
       case 'Select':
       case 'Select2':
-        $props['class'] = CRM_Utils_Array::value('class', $props, 'big') . ' crm-select2';
+        $props['class'] = ($props['class'] ?? 'big') . ' crm-select2';
         // TODO: Add and/or option for fields that store multiple values
         return $this->add(strtolower($widget), $name, $label, $options, $required, $props);
 
@@ -2048,8 +2056,7 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
 
       case 'EntityRef':
         // Auto-apply filters from field metadata
-        foreach ($fieldSpec['html']['filter'] ?? [] as $filter) {
-          [$k, $v] = explode('=', $filter);
+        foreach ($fieldSpec['html']['filter'] ?? [] as $k => $v) {
           $props['api']['params'][$k] = $v;
         }
         return $this->addEntityRef($name, $label, $props, $required);
@@ -2871,10 +2878,11 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
       // This is appropriate as it is a pseudofield.
       $this->setConstants(['task' => '']);
       $this->assign('taskMetaData', $tasks);
-      $select = $this->add('select', 'task', NULL, ['' => ts('Actions')], FALSE, [
+      $select = $this->add('select', 'task', NULL, ['' => ts('Actions')], FALSE,
+      [
         'class' => 'crm-select2 crm-action-menu fa-check-circle-o huge crm-search-result-actions',
-      ]
-      );
+        'title' => ts('Actions'),
+      ]);
       foreach ($tasks as $key => $task) {
         $attributes = [];
         if (isset($task['data'])) {
@@ -2909,10 +2917,10 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
    * This is like a save point :-). The next status bounce will
    * return the browser to this url unless another is added.
    *
-   * @param string $path
+   * @param string|null $path
    *   Path string e.g. `civicrm/foo/bar?reset=1`, defaults to current path.
    */
-  protected function pushUrlToUserContext(string $path = NULL): void {
+  protected function pushUrlToUserContext(?string $path = NULL): void {
     $url = CRM_Utils_System::url($path ?: CRM_Utils_System::currentPath() . '?reset=1',
       '', FALSE, NULL, FALSE);
     CRM_Core_Session::singleton()->pushUserContext($url);
@@ -3178,7 +3186,7 @@ class CRM_Core_Form extends HTML_QuickForm_Page {
     // Numeric fields are not in submittableMoneyFields (for now)
     $fieldRules = $this->_rules[$fieldName] ?? [];
     foreach ($fieldRules as $rule) {
-      if ('money' === $rule['type']) {
+      if ('money' === $rule['type'] || 'numberInternational' === $rule['type']) {
         return CRM_Utils_Rule::cleanMoney($value);
       }
     }

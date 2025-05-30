@@ -66,6 +66,7 @@ return [
           'classes' => [
             'table',
             'table-striped',
+            'crm-sticky-header',
           ],
           'pager' => [
             'show_count' => TRUE,
@@ -125,6 +126,14 @@ return [
             ],
             [
               'type' => 'field',
+              'key' => 'is_active',
+              'dataType' => 'Boolean',
+              'label' => E::ts('Enabled'),
+              'sortable' => TRUE,
+              'editable' => TRUE,
+            ],
+            [
+              'type' => 'field',
               'key' => 'is_reserved',
               'dataType' => 'Boolean',
               'label' => E::ts('Reserved'),
@@ -136,14 +145,14 @@ return [
               'dataType' => 'Boolean',
               'label' => E::ts('Default'),
               'sortable' => TRUE,
-            ],
-            [
-              'type' => 'field',
-              'key' => 'is_active',
-              'dataType' => 'Boolean',
-              'label' => E::ts('Enabled'),
-              'sortable' => TRUE,
-              'editable' => TRUE,
+              'rewrite' => '[none]',
+              'icons' => [
+                [
+                  'icon' => 'fa-check',
+                  'side' => 'left',
+                  'if' => ['is_default', '=', TRUE],
+                ],
+              ],
             ],
             [
               'size' => 'btn-xs',
