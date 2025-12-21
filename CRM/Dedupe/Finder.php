@@ -292,7 +292,7 @@ class CRM_Dedupe_Finder {
         }
         $flat[$date] = CRM_Utils_Date::processDate($flat[$date]);
         if ($flat[$date] !== $original) {
-          CRM_Core_Error::deprecatedWarning('passing in mis-formatted date values is deprecated');
+          // CRM_Core_Error::deprecatedWarning('passing in mis-formatted date values is deprecated');
         }
       }
     }
