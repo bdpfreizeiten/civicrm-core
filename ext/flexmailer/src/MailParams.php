@@ -45,7 +45,7 @@ class MailParams {
     // pass through as email headers, but there are several special-cases
     // (e.g. 'toName', 'toEmail', 'text', 'html', 'attachments', 'headers').
 
-    $message = new \Mail_mime();
+    $message = new \Mail_mime(\CRM_Utils_Mail::pickDefaultEol());
 
     // 1. Consolidate: 'toName' and 'toEmail' should be 'To'.
     $toName = trim($mailParams['toName']);
@@ -59,6 +59,16 @@ class MailParams {
     unset($mailParams['toName']);
     unset($mailParams['toEmail']);
     $mailParams['To'] = "$toName <$toEmail>";
+
+    if (!empty($mailParams['cc'])) {
+      $mailParams['Cc'] = $mailParams['cc'];
+      unset($mailParams['cc']);
+    }
+
+    if (!empty($mailParams['bcc'])) {
+      $mailParams['Bcc'] = $mailParams['bcc'];
+      unset($mailParams['bcc']);
+    }
 
     // 2. Apply the other fields.
     foreach ($mailParams as $key => $value) {

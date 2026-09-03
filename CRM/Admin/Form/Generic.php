@@ -30,7 +30,7 @@ class CRM_Admin_Form_Generic extends CRM_Core_Form {
    * Sections can be added using hook_civicrm_preProcess
    *
    * @var array[]
-   *   {title: string, icon: string, weight: int, description: string, docUrl: array}
+   *   {title: string, icon: string, weight: int, description: string, doc_url: array}
    */
   public $sections = [];
 
@@ -43,9 +43,12 @@ class CRM_Admin_Form_Generic extends CRM_Core_Form {
     $filter = $this->getSettingPageFilter();
     // Start with fully-resolved metadata for all settings; this allows callbacks to add/remove themselves from pages
     $allSettings = \Civi\Core\SettingsMetadata::getMetadata(NULL, NULL, TRUE, FALSE, TRUE);
+    // Filter by page filter, and also hide contact-specific settings
     $this->_settings = array_filter($allSettings, function ($setting) use ($filter) {
-      return !empty($setting['settings_pages'][$filter]);
+      return !empty($setting['settings_pages'][$filter]) && empty($setting['is_contact']);
     });
+    // Add CSS for File CRUD form elements
+    Civi::resources()->addStyleFile('civicrm', 'css/admin.css');
   }
 
   /**
@@ -91,7 +94,7 @@ class CRM_Admin_Form_Generic extends CRM_Core_Form {
     // Sort sections by weight
     uasort($sections, ['CRM_Utils_Sort', 'cmpFunc']);
 
-    $this->assign('readOnlyFields', $this->readOnlyFields);
+    $this->assign('readOnlyFields', array_keys($this->getMandatoryValues()));
     $this->assign('settingPageName', $filter);
     $this->assign('settingSections', $sections);
 
@@ -141,13 +144,13 @@ class CRM_Admin_Form_Generic extends CRM_Core_Form {
     $errors = [];
 
     foreach ($settings as $settingName => $settingMeta) {
-      if (!empty($settingMeta['validate_callback'])) {
+      if (!empty($settingMeta['validate_callback']) && (isset($fields[$settingName]) || !empty($files[$settingName]['type']))) {
         $errorText = NULL;
         $callback = Civi\Core\Resolver::singleton()->get($settingMeta['validate_callback']);
         // These validate_callbacks are inconsistent. Some return FALSE, others throw an Exception.
         try {
-          $value = self::formatSettingValue($settingMeta, $fields[$settingName] ?? NULL);
-          $valid = call_user_func_array($callback, [$value, $settingMeta]);
+          $value = self::formatSettingValue($settingMeta, $fields[$settingName] ?? $files[$settingName]);
+          $valid = call_user_func_array($callback, [&$value, $settingMeta]);
         }
         catch (CRM_Core_Exception $e) {
           $valid = FALSE;

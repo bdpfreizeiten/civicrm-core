@@ -1123,21 +1123,7 @@ WHERE civicrm_event.is_active = 1
           'credit_card_exp_date' => CRM_Utils_Date::mysqlToIso(CRM_Utils_Date::format($participantParams['credit_card_exp_date'] ?? NULL)),
           'selfcancelxfer_time' => abs($values['event']['selfcancelxfer_time']),
           'selfservice_preposition' => $values['event']['selfcancelxfer_time'] < 0 ? ts('after') : ts('before'),
-          'currency' => $values['event']['currency'] ?? CRM_Core_Config::singleton()->defaultCurrency,
         ]);
-
-        // CRM-13890 : NOTE wait list condition need to be given so that
-        // wait list message is shown properly in email i.e. WRT online event registration template
-        if (empty($tplParams['participant_status']) && empty($values['params']['isOnWaitlist'])) {
-          // @todo - this is no longer used in the core template - deprecate & remove
-          $statusId = CRM_Core_DAO::getFieldValue('CRM_Event_DAO_Participant', $participantId, 'status_id', 'id', TRUE);
-          $tplParams['participant_status'] = CRM_Event_PseudoConstant::participantStatus($statusId, NULL, 'label');
-        }
-        //CRM-15754 - if participant_status contains status ID
-        // @todo - this is no longer used in the core template - deprecate & remove
-        elseif (!empty($tplParams['participant_status']) && CRM_Utils_Rule::integer($tplParams['participant_status'])) {
-          $tplParams['participant_status'] = CRM_Event_PseudoConstant::participantStatus($tplParams['participant_status'], NULL, 'label');
-        }
 
         $sendTemplateParams = [
           'workflow' => 'event_online_receipt',
@@ -1151,35 +1137,6 @@ WHERE civicrm_event.is_active = 1
             'note' => $participantParams['note'] ?? '',
           ],
         ];
-
-        // address required during receipt processing (pdf and email receipt)
-        $displayAddress = $values['address'] ?? NULL;
-        if ($displayAddress) {
-          $sendTemplateParams['tplParams']['address'] = $displayAddress;
-        }
-
-        // set lineItem details
-        $lineItem = $values['lineItem'] ?? NULL;
-        if ($lineItem) {
-          // check if additional participant, if so filter only to relevant ones
-          // CRM-9902
-          if (!empty($values['params']['additionalParticipant'])) {
-            $ownLineItems = [];
-            foreach ($lineItem as $liKey => $liValue) {
-              $firstElement = array_pop($liValue);
-              if ($firstElement['entity_id'] == $participantId) {
-                $ownLineItems[0] = $lineItem[$liKey];
-                break;
-              }
-            }
-            if (!empty($ownLineItems)) {
-              $sendTemplateParams['tplParams']['lineItem'] = $ownLineItems;
-            }
-          }
-          else {
-            $sendTemplateParams['tplParams']['lineItem'] = $lineItem;
-          }
-        }
 
         if ($returnMessageText) {
           [$sent, $subject, $message, $html] = CRM_Core_BAO_MessageTemplate::sendTemplate($sendTemplateParams);
@@ -1200,7 +1157,7 @@ WHERE civicrm_event.is_active = 1
 
           if (Civi::settings()->get('invoice_is_email_pdf') && !empty($values['contributionId'])) {
             $sendTemplateParams['isEmailPdf'] = TRUE;
-            $sendTemplateParams['contributionId'] = $values['contributionId'];
+            $sendTemplateParams['modelProps']['contributionID'] = $values['contributionId'];
           }
           CRM_Core_BAO_MessageTemplate::sendTemplate($sendTemplateParams);
         }
@@ -1395,7 +1352,14 @@ WHERE civicrm_event.is_active = 1
           'participant_role' == $name
         ) {
           $roles = CRM_Event_PseudoConstant::participantRole();
-          $values[$index] = $roles[$params[$name]];
+          $paramRoles = CRM_Core_DAO::unSerializeField($params[$name], CRM_Core_DAO::SERIALIZE_SEPARATOR_TRIMMED);
+          $roleLabels = [];
+          foreach ($paramRoles as $roleId) {
+            if (isset($roles[$roleId])) {
+              $roleLabels[] = $roles[$roleId];
+            }
+          }
+          $values[$index] = implode(', ', $roleLabels);
         }
         elseif ('participant_status_id' == $name or
           'participant_status' == $name
@@ -1468,7 +1432,11 @@ WHERE  id = $cfID
                 $values[$index] = CRM_Utils_File::getFileURL($path, $fileType);
               }
               else {
-                if ($dao->data_type == 'Int' ||
+                // For checkboxes, change array of [key => bool] to array of [idx => key]
+                if ($dao->html_type == 'CheckBox') {
+                  $customVal = is_array($params[$name]) ? array_keys(array_filter($params[$name])) : $params[$name];
+                }
+                elseif ($dao->data_type == 'Int' ||
                   $dao->data_type == 'Boolean'
                 ) {
                   $v = $params[$name];
@@ -1485,17 +1453,7 @@ WHERE  id = $cfID
                   // sometime in the future
                   $customVal = $displayValue = CRM_Utils_Date::customFormat(
                     CRM_Utils_Date::processDate($params[$name]), $config->dateformatFull);
-
-                  if (!empty($params[$name . '_time'])) {
-                    $customVal = $displayValue = CRM_Utils_Date::customFormat(
-                      CRM_Utils_Date::processDate($params[$name], $params[$name . '_time']),
-                      $config->dateformatDatetime);
-                  }
                   $skip = TRUE;
-                }
-                // for checkboxes, change array of [key => bool] to array of [idx => key]
-                elseif ($dao->html_type == 'CheckBox') {
-                  $customVal = array_keys(array_filter($params[$name]));
                 }
                 else {
                   $customVal = $params[$name];
@@ -1691,16 +1649,12 @@ WHERE  id = $cfID
       'loc_block_id.address_id.state_province_id.name',
     ];
 
-    $result = civicrm_api3('Event', 'get', [
-      'check_permissions' => TRUE,
-      'return' => $ret,
-      'loc_block_id.address_id' => ['IS NOT NULL' => 1],
-      'options' => [
-        'limit' => 0,
-      ],
-    ]);
+    $result = \Civi\Api4\Event::get(TRUE)
+      ->setSelect($ret)
+      ->addWhere('loc_block_id.address_id', 'IS NOT NULL')
+      ->execute();
 
-    foreach ($result['values'] as $event) {
+    foreach ($result as $event) {
       $address = '';
       foreach ($ret as $field) {
         if ($field != 'loc_block_id' && !empty($event[$field])) {
@@ -2347,8 +2301,7 @@ WHERE  ce.loc_block_id = $locBlockId";
           $values[$valuesKeys[$noteKeyPos]] = "";
         }
 
-        if (isset($fields['participant_status_id']['title']) &&
-          isset($values[$fields['participant_status_id']['title']]) &&
+        if (isset($fields['participant_status_id']['title'], $values[$fields['participant_status_id']['title']]) &&
           is_numeric($values[$fields['participant_status_id']['title']])
         ) {
           // @todo - is this a thing?
@@ -2356,23 +2309,20 @@ WHERE  ce.loc_block_id = $locBlockId";
           $values[$fields['participant_status_id']['title']] = CRM_Core_PseudoConstant::getLabel('CRM_Event_BAO_Participant', 'status_id', $statusID);
         }
 
-        if (isset($fields['participant_role_id']['title']) &&
-          isset($values[$fields['participant_role_id']['title']]) &&
+        if (isset($fields['participant_role_id']['title'], $values[$fields['participant_role_id']['title']]) &&
           is_numeric($values[$fields['participant_role_id']['title']])
         ) {
           $roleID = $values[$fields['participant_role_id']['title']];
           $values[$fields['participant_role_id']['title']] = CRM_Core_PseudoConstant::getLabel('CRM_Event_BAO_Participant', 'role_id', $roleID);
         }
 
-        if (isset($fields['participant_register_date']['title']) &&
-          isset($values[$fields['participant_register_date']['title']])
+        if (isset($fields['participant_register_date']['title'], $values[$fields['participant_register_date']['title']])
         ) {
           $values[$fields['participant_register_date']['title']] = CRM_Utils_Date::customFormat($values[$fields['participant_register_date']['title']]);
         }
 
         //handle fee_level for price set
-        if (isset($fields['participant_fee_level']['title']) &&
-          isset($values[$fields['participant_fee_level']['title']])
+        if (isset($fields['participant_fee_level']['title'], $values[$fields['participant_fee_level']['title']])
         ) {
           $feeLevel = explode(CRM_Core_DAO::VALUE_SEPARATOR,
             $values[$fields['participant_fee_level']['title']]

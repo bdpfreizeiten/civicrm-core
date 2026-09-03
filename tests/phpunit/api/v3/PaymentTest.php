@@ -513,6 +513,64 @@ class api_v3_PaymentTest extends CiviUnitTestCase {
   }
 
   /**
+   * Test allocation of a payment across line items when the proportional
+   * split creates a rounding remainder.
+   *
+   * A payment of 100 against 3 line items of 100 each works out at
+   * 33.333 recurring per line item. Allocations should be rounded to
+   * 2 decimal places with the leftover cent assigned to the last line item,
+   * so that the sum of the allocations always equals the payment total.
+   *
+   * @throws \CRM_Core_Exception
+   */
+  public function testCreatePaymentLineItemAllocationRounding(): void {
+    $order = Order::create()
+      ->setContributionValues([
+        'contact_id' => $this->individualCreate(),
+        'financial_type_id:name' => 'Donation',
+      ])
+      ->addLineItem(['line_total_inclusive' => 100])
+      ->addLineItem(['line_total_inclusive' => 100])
+      ->addLineItem(['line_total_inclusive' => 100])
+      ->execute()->first();
+
+    // Pay 100 of 300. A third of each line item is 33.333 recurring so
+    // unrounded allocations would only add up to 99.99 once saved.
+    $payment = $this->callAPISuccess('Payment', 'create', [
+      'contribution_id' => $order['id'],
+      'total_amount' => 100,
+    ]);
+    $this->checkPaymentIsValid($payment['id'], $order['id'], 100);
+
+    $allocations = EntityFinancialTrxn::get(FALSE)
+      ->addWhere('entity_table', '=', 'civicrm_financial_item')
+      ->addWhere('financial_trxn_id', '=', $payment['id'])
+      ->addOrderBy('amount')
+      ->execute()->column('amount');
+    $this->assertEquals([33.33, 33.33, 33.34], $allocations, 'Allocations should be rounded with the remainder assigned to the last line item');
+    $this->assertEquals(100.00, array_sum($allocations), 'Allocated amounts should add up to the payment total');
+
+    // Pay the remaining 200. As this payment completes the contribution each
+    // line item should be allocated its exact outstanding balance
+    // (66.67, 66.67 & 66.66 after the first payment above).
+    $payment = $this->callAPISuccess('Payment', 'create', [
+      'contribution_id' => $order['id'],
+      'total_amount' => 200,
+    ]);
+
+    $allocations = EntityFinancialTrxn::get(FALSE)
+      ->addWhere('entity_table', '=', 'civicrm_financial_item')
+      ->addWhere('financial_trxn_id', '=', $payment['id'])
+      ->addOrderBy('amount')
+      ->execute()->column('amount');
+    $this->assertEquals([66.66, 66.67, 66.67], $allocations, 'Completing payment should allocate the outstanding balance of each line item');
+    $this->assertEquals(200.00, array_sum($allocations), 'Allocated amounts should add up to the payment total');
+
+    $contribution = $this->callAPISuccessGetSingle('Contribution', ['id' => $order['id']]);
+    $this->assertEquals('Completed', $contribution['contribution_status']);
+  }
+
+  /**
    * Function to assert db values
    *
    * @param array $payment
@@ -526,11 +584,12 @@ class api_v3_PaymentTest extends CiviUnitTestCase {
   }
 
   /**
-   * Test create payment api with line item in params
+   * Test create payment api with line item allocation in params
    *
    * @throws \CRM_Core_Exception
+   * @dataProvider getPaymentLineItemAllocations
    */
-  public function testCreatePaymentLineItems(): void {
+  public function testCreatePaymentLineItemsAllocations($paymentLineItemData): void {
     $contribution = $this->createPartiallyPaidParticipantOrder();
     $lineItems = $this->callAPISuccess('LineItem', 'get', ['contribution_id' => $contribution['id']])['values'];
 
@@ -538,10 +597,17 @@ class api_v3_PaymentTest extends CiviUnitTestCase {
     $params = [
       'contribution_id' => $contribution['id'],
       'total_amount' => 50,
+      // We set API version for Payment::create so we can test with v3 and v4 (parameters are similar)
+      'version' => $paymentLineItemData['api_version'],
     ];
-    $amounts = [40, 10];
+    $amounts = $paymentLineItemData['amounts1'];
     foreach ($lineItems as $id => $ignore) {
-      $params['line_item'][] = [$id => array_pop($amounts)];
+      if ($paymentLineItemData['api_version'] === 3) {
+        $params['line_item'][] = [$id => array_pop($amounts)];
+      }
+      else {
+        $params['line_item_allocation'][$id] = array_pop($amounts);
+      }
     }
     $payment = $this->callAPISuccess('Payment', 'create', $params);
     $this->checkPaymentIsValid($payment['id'], $contribution['id']);
@@ -559,9 +625,14 @@ class api_v3_PaymentTest extends CiviUnitTestCase {
       'contribution_id' => $contribution['id'],
       'total_amount' => 100,
     ];
-    $amounts = [80, 20];
+    $amounts = $paymentLineItemData['amounts2'];
     foreach ($lineItems as $id => $ignore) {
-      $params['line_item'][] = [$id => array_pop($amounts)];
+      if ($paymentLineItemData['api_version'] === 3) {
+        $params['line_item'][] = [$id => array_pop($amounts)];
+      }
+      else {
+        $params['line_item_allocation'][$id] = array_pop($amounts);
+      }
     }
     $payment = $this->callAPISuccess('Payment', 'create', $params);
     $expectedResult = [
@@ -593,6 +664,62 @@ class api_v3_PaymentTest extends CiviUnitTestCase {
     ];
     $this->callAPISuccessGetCount('ParticipantPayment', $paymentParticipant, 2);
     $this->callAPISuccessGetCount('participant', ['status_id' => 'Registered'], 2);
+  }
+
+  public static function getPaymentLineItemAllocations(): array {
+    $allocation = [
+      'api_version' => 3,
+      'amounts1' => [40, 10],
+      'amounts2' => [80, 20],
+    ];
+    $allocations[][] = $allocation;
+    $allocation['api_version'] = 4;
+    $allocations[][] = $allocation;
+    return $allocations;
+  }
+
+  /**
+   * Test that line item allocation parameters are valid
+   *
+   * @return void
+   * @throws \CRM_Core_Exception
+   * @throws \Civi\API\Exception\UnauthorizedException
+   */
+  public function testCreatePaymentLineItemsAssertIllegalParams() {
+    $this->_apiversion = 4;
+    $orderParams = $this->getParticipantOrderParams();
+    $order = Order::create()
+      ->setContributionValues($orderParams['contribution_params']);
+    foreach ($orderParams['line_items'] as $lineItem) {
+      $order->addLineItem($lineItem);
+    }
+    $contribution = $order->execute()->first();
+    $lineItems = \Civi\Api4\LineItem::get()
+      ->addWhere('contribution_id', '=', $contribution['id'])
+      ->execute()
+      ->indexBy('id');
+    $this->callAPISuccess('Payment', 'create', ['contribution_id' => $contribution['id'], 'total_amount' => 300, 'trxn_date' => date('YmdHis')]);
+
+    // This should throw CRM_Core_Exception "Cannot allocate line items that do not exist on the contribution"
+    $lineItemAllocation = [9999 => '-50'];
+    $this->callAPIFailure('Payment', 'create',
+      ['contribution_id' => $contribution['id'], 'total_amount' => -50, 'line_item_allocation' => $lineItemAllocation, 'trxn_date' => date('YmdHis')],
+      'Cannot allocate line items that do not exist on the contribution',
+    );
+
+    // This should throw CRM_Core_Exception "Cannot allocate a positive amount when processing a refund"
+    $lineItemAllocation = [$lineItems->first()['id'] => '20'];
+    $this->callAPIFailure('Payment', 'create',
+      ['contribution_id' => $contribution['id'], 'total_amount' => -50, 'line_item_allocation' => $lineItemAllocation, 'trxn_date' => date('YmdHis')],
+      'Cannot allocate a positive amount when processing a refund',
+    );
+
+    // This should throw CRM_Core_Exception "LineItem allocations must add up to the total amount"
+    $lineItemAllocation = [$lineItems->first()['id'] => '-20'];
+    $this->callAPIFailure('Payment', 'create',
+      ['contribution_id' => $contribution['id'], 'total_amount' => -50, 'line_item_allocation' => $lineItemAllocation, 'trxn_date' => date('YmdHis')],
+      'LineItem allocations must add up to the total amount',
+    );
   }
 
   /**

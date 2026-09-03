@@ -30,6 +30,10 @@ class CRM_Member_Form_Task extends CRM_Core_Form_Task {
    */
   protected $_memberIds;
 
+  public function getDefaultEntity(): string {
+    return 'Membership';
+  }
+
   /**
    * Build all the data structures needed to build the form.
    *
@@ -49,14 +53,17 @@ class CRM_Member_Form_Task extends CRM_Core_Form_Task {
     $form->_memberIds = [];
 
     $values = $form->getSearchFormValues();
-
-    $form->_task = $values['task'];
-    $tasks = CRM_Member_Task::permissionedTaskTitles(CRM_Core_Permission::getPermission());
-    if (!array_key_exists($form->_task, $tasks)) {
+    if (empty($values)) {
+      [$form->_task, $title] = CRM_Member_Task::getTaskAndTitleByClass(get_class($form));
+      $ids = explode(',', CRM_Utils_Request::retrieve('ids', 'CommaSeparatedIntegers', $form, TRUE));
+    }
+    else {
+      $form->_task = $values['task'];
+      $ids = $form->getSelectedIDs($values);
+    }
+    if (!array_key_exists($form->_task, CRM_Member_Task::permissionedTaskTitles(CRM_Core_Permission::getPermission()))) {
       CRM_Core_Error::statusBounce(ts('You do not have permission to access this page.'));
     }
-
-    $ids = $form->getSelectedIDs($values);
 
     if (!$ids) {
       $queryParams = $form->get('queryParams');
@@ -112,9 +119,9 @@ class CRM_Member_Form_Task extends CRM_Core_Form_Task {
       // checkPermissions set to false - in case form is bypassing in some way.
       $memberships = Membership::get(FALSE)
         ->addWhere('id', 'IN', $this->getIDs())
-        ->setSelect(['id', 'contact_id'])->execute();
+        ->setSelect(['id', 'contact_id', 'contribution_recur_id'])->execute();
       foreach ($memberships as $membership) {
-        $this->rows[] = [
+        $row = [
           'contact_id' => $membership['contact_id'],
           'membership_id' => $membership['id'],
           'schema' => [
@@ -122,6 +129,11 @@ class CRM_Member_Form_Task extends CRM_Core_Form_Task {
             'membershipId' => $membership['id'],
           ],
         ];
+        if (!empty($membership['contribution_recur_id'])) {
+          $row['contribution_recur_id'] = $membership['contribution_recur_id'];
+          $row['schema']['contribution_recurId'] = $membership['contribution_recur_id'];
+        }
+        $this->rows[] = $row;
       }
     }
     return $this->rows;
@@ -133,7 +145,7 @@ class CRM_Member_Form_Task extends CRM_Core_Form_Task {
    * @return array
    */
   public function getTokenSchema(): array {
-    return ['membershipId', 'contactId'];
+    return ['contribution_recurId', 'membershipId', 'contactId'];
   }
 
 }

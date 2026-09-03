@@ -4,6 +4,7 @@ return [
   'name' => 'Event',
   'table' => 'civicrm_event',
   'class' => 'CRM_Event_DAO_Event',
+  'token_class' => 'CRM_Event_Tokens',
   'getInfo' => fn() => [
     'title' => ts('Event'),
     'title_plural' => ts('Events'),
@@ -16,6 +17,7 @@ return [
   'getPaths' => fn() => [
     'add' => 'civicrm/event/add?reset=1',
     'view' => 'civicrm/event/info?reset=1&id=[id]',
+    'update' => 'civicrm/event/manage/settings?action=update&reset=1&id=[id]',
   ],
   'getIndices' => fn() => [
     'index_event_type_id' => [
@@ -596,6 +598,9 @@ return [
     'min_initial_amount' => [
       'title' => ts('Minimum Initial Amount'),
       'sql_type' => 'decimal(20,2)',
+      'input_attrs' => [
+        'control_field' => 'currency',
+      ],
       'input_type' => 'Text',
       'description' => ts('Minimum initial amount for partial payment'),
       'add' => '4.3',
@@ -759,6 +764,11 @@ return [
       ],
       'input_attrs' => [
         'label' => ts('Currency'),
+      ],
+      'entity_reference' => [
+        'entity' => 'Currency',
+        'key' => 'name',
+        'on_delete' => 'SET NULL',
       ],
       'pseudoconstant' => [
         'table' => 'civicrm_currency',

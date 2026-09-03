@@ -27,6 +27,14 @@ class api_v3_ExtensionTest extends CiviUnitTestCase {
   public function setUp(): void {
     parent::setUp();
     Civi::settings()->set('ext_repo_url', 'http://localhost:9999/fake-repo');
+    if (!defined('CIVICRM_EXTENSION_DOWNLOAD_TRUSTED_HOSTS')) {
+      define('CIVICRM_EXTENSION_DOWNLOAD_TRUSTED_HOSTS', ['localhost']);
+    }
+    else {
+      if (!in_array('localhost', CIVICRM_EXTENSION_DOWNLOAD_TRUSTED_HOSTS)) {
+        throw new \CRM_Core_Exception('api_v3_ExtensionTest requires localhost in the trusted hosts list, but this could not be set');
+      }
+    }
   }
 
   public function tearDown(): void {
@@ -82,7 +90,7 @@ class api_v3_ExtensionTest extends CiviUnitTestCase {
    */
   public function testExtensionGet(): void {
     $result = $this->callAPISuccess('extension', 'get', ['options' => ['limit' => 0]]);
-    $testExtensionResult = $this->callAPISuccess('extension', 'get', ['key' => 'test.extension.manager.paymenttest']);
+    $testExtensionResult = $this->callAPISuccess('extension', 'get', ['key' => 'test.extension.manager.moduletest']);
     $ext = $result['values'][$testExtensionResult['id']];
     $this->assertNotNull($ext['typeInfo']);
     $this->assertEquals(['mgmt:hidden', 'mock'], $ext['tags']);
@@ -112,7 +120,7 @@ class api_v3_ExtensionTest extends CiviUnitTestCase {
   }
 
   public function testGetMultipleExtensions(): void {
-    $result = $this->callAPISuccess('extension', 'get', ['key' => ['test.extension.manager.paymenttest', 'test.extension.manager.moduletest']]);
+    $result = $this->callAPISuccess('extension', 'get', ['key' => ['test.extension.manager.moduletest', 'test.extension.manager.moduleupgtest']]);
     $this->assertEquals(2, $result['count']);
   }
 
@@ -120,7 +128,7 @@ class api_v3_ExtensionTest extends CiviUnitTestCase {
    * Test that extension get works with api request with parameter full_name as build by api explorer.
    */
   public function testGetMultipleExtensionsApiExplorer(): void {
-    $result = $this->callAPISuccess('extension', 'get', ['full_name' => ['test.extension.manager.paymenttest', 'test.extension.manager.moduletest']]);
+    $result = $this->callAPISuccess('extension', 'get', ['full_name' => ['test.extension.manager.moduletest', 'test.extension.manager.moduleupgtest']]);
     $this->assertEquals(2, $result['count']);
   }
 

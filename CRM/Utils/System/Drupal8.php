@@ -349,7 +349,8 @@ class CRM_Utils_System_Drupal8 extends CRM_Utils_System_DrupalBase {
    * @inheritDoc
    */
   public function loadUser($username) {
-    $user = user_load_by_name($username);
+    $users = \Drupal::entityTypeManager()->getStorage('user')->loadByProperties(['name' => $username]);
+    $user = reset($users);
     if (!$user) {
       return FALSE;
     }
@@ -374,7 +375,8 @@ class CRM_Utils_System_Drupal8 extends CRM_Utils_System_DrupalBase {
    * @return int|null
    */
   public function getUfId($username) {
-    $user = user_load_by_name($username);
+    $users = \Drupal::entityTypeManager()->getStorage('user')->loadByProperties(['name' => $username]);
+    $user = reset($users);
     if ($user && $id = $user->id()) {
       return $id;
     }
@@ -858,6 +860,41 @@ class CRM_Utils_System_Drupal8 extends CRM_Utils_System_DrupalBase {
     $roles = \Drupal\user\Entity\Role::loadMultiple();
     $names = array_map(fn(\Drupal\user\RoleInterface $role) => $role->label(), $roles);
     return $names;
+  }
+
+  /**
+   * @inheritDoc
+   */
+  public function addUfRole(int $ufID, string $role): bool {
+    // The anonymous/authenticated roles are implicit and cannot be assigned;
+    // Drupal\user\Entity\User::addRole() throws for them.
+    if (in_array($role, [\Drupal\user\RoleInterface::ANONYMOUS_ID, \Drupal\user\RoleInterface::AUTHENTICATED_ID], TRUE)) {
+      return FALSE;
+    }
+    $user = \Drupal\user\Entity\User::load($ufID);
+    if (!$user || !\Drupal\user\Entity\Role::load($role)) {
+      return FALSE;
+    }
+    if (!$user->hasRole($role)) {
+      $user->addRole($role);
+      $user->save();
+    }
+    return TRUE;
+  }
+
+  /**
+   * @inheritDoc
+   */
+  public function removeUfRole(int $ufID, string $role): bool {
+    $user = \Drupal\user\Entity\User::load($ufID);
+    if (!$user || !\Drupal\user\Entity\Role::load($role)) {
+      return FALSE;
+    }
+    if ($user->hasRole($role)) {
+      $user->removeRole($role);
+      $user->save();
+    }
+    return TRUE;
   }
 
   /**

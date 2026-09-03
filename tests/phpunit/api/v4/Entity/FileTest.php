@@ -56,10 +56,14 @@ class FileTest extends Api4TestBase {
 
     $this->assertFileDoesNotExist($originalFile);
 
-    // Hmm, the API has no way to read the content of the saved file! We'll fudge it...
-    $newFile = \CRM_Core_Config::singleton()->customFileUploadDir . $create['uri'];
-    $this->assertFileExists($newFile);
-    $this->assertEquals($originalContent, file_get_contents($newFile));
+    // Get content of new file with api
+    $getResult = \Civi\Api4\File::get(FALSE)
+      ->addSelect('uri', 'url', 'content')
+      ->addWhere('id', '=', $create['id'])
+      ->execute()->single();
+    $this->assertEquals($originalContent, $getResult['content']);
+    // Assert the url does not contain the file name
+    $this->assertStringNotContainsString('test456', $getResult['url']);
   }
 
   /**
@@ -84,6 +88,205 @@ class FileTest extends Api4TestBase {
       $this->assertTrue(str_contains($e->getMessage(), 'only allowed in trusted operation'), 'Exception should relate to permission check');
       $this->assertFileExists($originalFile, 'If creation is rejected, then file should still exist.');
     }
+  }
+
+  public function testPublicPrivateFiles(): void {
+    $fileContent = 'File Content ' . rand();
+
+    // Create file with is_public = TRUE
+    $create = \Civi\Api4\File::create(FALSE)
+      ->setValues([
+        'mime_type' => 'text/plain',
+        'file_name' => 'public_test.txt',
+        'is_public' => TRUE,
+        'content' => $fileContent,
+      ])->execute()->single();
+
+    // Assert file is in the public directory
+    $publicFile = \CRM_Core_Config::singleton()->imageUploadDir . '/' . $create['uri'];
+    $this->assertFileExists($publicFile);
+    $this->assertEquals($fileContent, file_get_contents($publicFile));
+
+    // Assert we can get contents via API
+    $getResult = \Civi\Api4\File::get(FALSE)
+      ->addSelect('uri', 'url', 'content')
+      ->addWhere('id', '=', $create['id'])
+      ->execute()->single();
+    $this->assertEquals($create['uri'], $getResult['uri']);
+    $this->assertEquals($fileContent, $getResult['content']);
+    // Assert the url contains the file name (it's public)
+    $this->assertStringContainsString($getResult['uri'], $getResult['url']);
+
+    // Assert we can get content without selecting uri
+    $getResult = \Civi\Api4\File::get(FALSE)
+      ->addSelect('content')
+      ->addWhere('id', '=', $create['id'])
+      ->execute()->single();
+    $this->assertEquals($fileContent, $getResult['content']);
+
+    // Update file to is_public = FALSE
+    \Civi\Api4\File::update(FALSE)
+      ->addValue('is_public', FALSE)
+      ->addWhere('id', '=', $create['id'])
+      ->execute();
+
+    // Assert file has been moved to private directory
+    $this->assertFileDoesNotExist($publicFile);
+    $privateFile = \CRM_Core_Config::singleton()->customFileUploadDir . '/' . $create['uri'];
+    $this->assertFileExists($privateFile);
+    $this->assertEquals($fileContent, file_get_contents($privateFile));
+
+    // Get content of moved file with api
+    $getResult = \Civi\Api4\File::get(FALSE)
+      ->addSelect('uri', 'url', 'content')
+      ->addWhere('id', '=', $create['id'])
+      ->execute()->single();
+    $this->assertEquals($fileContent, $getResult['content']);
+    // Assert the url does not contain the file name (it's private)
+    $this->assertStringNotContainsString($getResult['uri'], $getResult['url']);
+  }
+
+  /**
+   * Verify that uri can be set in an update operation if it matches the existing uri.
+   */
+  public function testUriUpdateSameAllowed(): void {
+    $create = \Civi\Api4\File::create(FALSE)
+      ->setValues([
+        'mime_type' => 'text/plain',
+        'file_name' => 'original_uri.txt',
+        'content' => 'Hello World',
+      ])->execute()->single();
+
+    // Update with same uri should succeed even though it's untrusted
+    $update = \Civi\Api4\File::update()
+      ->addWhere('id', '=', $create['id'])
+      ->setValues([
+        'uri' => $create['uri'],
+        'mime_type' => 'text/plain',
+      ])->execute()->single();
+
+    try {
+      \Civi\Api4\File::update(FALSE)
+        ->addWhere('id', '=', $create['id'])
+        ->setValues([
+          'uri' => 'different_uri.txt',
+          'mime_type' => 'text/plain',
+        ])->execute()->single();
+      $this->fail('File::update should fail when uri is changed');
+    }
+    catch (\CRM_Core_Exception $e) {
+      $this->assertTrue(str_contains($e->getMessage(), 'cannot be changed'));
+    }
+  }
+
+  /**
+   * File::create() does not permit setting 'uri'.
+   */
+  public function testUriNotAllowed(): void {
+    try {
+      \Civi\Api4\File::create(FALSE)
+        ->setValues([
+          'mime_type' => 'text/plain',
+          'uri' => 'custom_uri_test.txt',
+          'content' => 'Hello World',
+        ])->execute()->single();
+      $this->fail('File::create should fail when uri is set');
+    }
+    catch (\CRM_Core_Exception $e) {
+      $this->assertTrue(str_contains(strtolower($e->getMessage()), 'uri'));
+    }
+  }
+
+  /**
+   * Test that path traversal attacks are prevented in API v3 create.
+   */
+  public function testPathTraversalV3Create(): void {
+    $pathTraversalUris = [
+      '../../../../../../var/www/html/shell.php',
+      '../../../shell.php',
+      'subdir/../../shell.php',
+      'foo/../../../shell.php',
+    ];
+
+    foreach ($pathTraversalUris as $maliciousUri) {
+      try {
+        civicrm_api3('File', 'create', [
+          'uri' => $maliciousUri,
+          'mime_type' => 'text/html',
+        ]);
+        $this->fail("API v3 File create should reject path traversal URI: $maliciousUri");
+      }
+      catch (\CRM_Core_Exception $e) {
+        $this->assertStringContainsString('directory separator', $e->getMessage());
+      }
+    }
+  }
+
+  /**
+   * Test that path traversal attacks are prevented in API v3 update.
+   */
+  public function testPathTraversalV3Update(): void {
+    // Create a legitimate file first
+    $result = civicrm_api3('File', 'create', [
+      'uri' => 'legitimate.txt',
+      'mime_type' => 'text/plain',
+    ]);
+    $fileId = $result['id'];
+
+    $pathTraversalUris = [
+      '../../../../../../var/www/html/shell.php',
+      '../../../shell.php',
+    ];
+
+    foreach ($pathTraversalUris as $maliciousUri) {
+      try {
+        civicrm_api3('File', 'update', [
+          'id' => $fileId,
+          'uri' => $maliciousUri,
+        ]);
+        $this->fail("API v3 File update should reject path traversal URI: $maliciousUri");
+      }
+      catch (\CRM_Core_Exception $e) {
+        $this->assertStringContainsString('directory separator', $e->getMessage());
+      }
+    }
+  }
+
+  /**
+   * Test that API v4 prevents writing content to files with malicious URIs.
+   *
+   * This tests the scenario where a file with a path traversal URI was created
+   * (e.g., via direct database manipulation or exploiting API v3 before the fix),
+   * and an attacker tries to use API v4 update to write malicious content.
+   */
+  public function testPathTraversalV4UpdateContentBlocked(): void {
+    // Simulate a file record with a malicious URI that somehow exists in the database
+    // (e.g., from direct DB manipulation or old vulnerable code)
+    $maliciousUri = '../../../../../../tmp/malicious.php';
+
+    // Insert directly into database to bypass API validation
+    $fileDAO = new \CRM_Core_DAO_File();
+    $fileDAO->uri = $maliciousUri;
+    $fileDAO->mime_type = 'text/html';
+    $fileDAO->upload_date = date("Ymd");
+    $fileDAO->save();
+    $fileId = $fileDAO->id;
+
+    // Now try to use API v4 to write content to this file
+    try {
+      \Civi\Api4\File::update(FALSE)
+        ->addWhere('id', '=', $fileId)
+        ->setValues([
+          'content' => '<?php system($_GET["cmd"]); ?>',
+        ])->execute();
+      $this->fail('API v4 File update should reject writing content to file with path traversal URI');
+    }
+    catch (\CRM_Core_Exception $e) {
+      $this->assertStringContainsString('directory separator', $e->getMessage());
+    }
+
+    // Verify the malicious file was not created outside the upload directory
+    $this->assertFileDoesNotExist('/tmp/malicious.php');
   }
 
 }

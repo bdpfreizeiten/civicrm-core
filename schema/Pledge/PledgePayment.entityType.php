@@ -11,6 +11,10 @@ return [
     'log' => TRUE,
     'add' => '2.1',
   ],
+  'getPaths' => fn() => [
+    'view' => 'civicrm/contact/view/contribution?reset=1&id=[contribution_id]&action=view&context=pledge',
+    'update' => 'civicrm/pledge/payment?reset=1&action=update&ppId=[id]',
+  ],
   'getIndices' => fn() => [
     'index_contribution_pledge' => [
       'fields' => [
@@ -76,6 +80,9 @@ return [
     'scheduled_amount' => [
       'title' => ts('Scheduled Amount'),
       'sql_type' => 'decimal(20,2)',
+      'input_attrs' => [
+        'control_field' => 'currency',
+      ],
       'input_type' => NULL,
       'required' => TRUE,
       'description' => ts('Pledged amount for this payment (the actual contribution amount might be different).'),
@@ -90,6 +97,9 @@ return [
     'actual_amount' => [
       'title' => ts('Actual Amount'),
       'sql_type' => 'decimal(20,2)',
+      'input_attrs' => [
+        'control_field' => 'currency',
+      ],
       'input_type' => NULL,
       'description' => ts('Actual amount that is paid as the Pledged installment amount.'),
       'add' => '3.2',
@@ -107,6 +117,11 @@ return [
       'description' => ts('3 character string, value from config setting or input via user.'),
       'add' => '3.2',
       'default' => NULL,
+      'entity_reference' => [
+        'entity' => 'Currency',
+        'key' => 'name',
+        'on_delete' => 'SET NULL',
+      ],
       'pseudoconstant' => [
         'table' => 'civicrm_currency',
         'key_column' => 'name',

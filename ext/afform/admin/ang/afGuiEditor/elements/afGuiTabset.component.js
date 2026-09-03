@@ -20,7 +20,7 @@
         this.selectedTab = 0;
         this.searchDisplays = [];
 
-        this.node['#children'].forEach(function(tab, i) {
+        this.node['#children'].forEach((tab) => {
           tab['#children'] = tab['#children'] || [];
         });
 
@@ -46,10 +46,10 @@
         }
       };
 
-      this.addTab = function() {
+      this.addTab = () => {
         this.node['#children'].push({
           '#tag': 'af-tab',
-          'title': ts('New Tab'),
+          'title': this.isPages() ? ts('New Page') : ts('New Tab'),
           '#children': [],
         });
         this.selectTab(this.node['#children'].length - 1);
@@ -66,7 +66,7 @@
       };
 
       this.pickIcon = function(tab) {
-        afGui.pickIcon().then(function(val) {
+        afGui.pickIcon().then((val) => {
           tab.icon = val;
         });
       };
@@ -77,7 +77,7 @@
 
       // When opening the menu, fetch search displays to show in the `af-gui-tab-count` select
       this.getSearchDisplays = function(tabIndex) {
-        const displayTags = afGui.getFormElements(this.node['#children'][tabIndex]['#children'], (item) => (item['#tag'] && item['#tag'].startsWith('crm-search-display-') && item['search-name']));
+        const displayTags = afGui.getFormElements(this.node['#children'][tabIndex]['#children'], (item) => (item['#tag'] && afGui.meta.searchDisplayTags.includes(item['#tag']) && item['search-name']));
         this.searchDisplays[tabIndex] = displayTags.map(item => {
           return {
             tag: item,
@@ -103,6 +103,8 @@
       this.getSetCount = function (tabIndex) {
         return _.wrap(tabIndex, getSetCount);
       };
+
+      this.isPages = () => this.node['page-nav-buttons'];
 
     }
   });

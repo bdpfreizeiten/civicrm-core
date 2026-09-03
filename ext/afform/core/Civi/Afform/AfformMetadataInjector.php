@@ -19,11 +19,18 @@ use CRM_Afform_ExtensionUtil as E;
 class AfformMetadataInjector {
 
   /**
+   * Preprocess
+   *
    * @param \Civi\Core\Event\GenericHookEvent $e
    * @see CRM_Utils_Hook::alterAngular()
    */
   public static function preprocess($e) {
     $changeSet = \Civi\Angular\ChangeSet::create('fieldMetadata')
+      // Adjust default distance unit for Location input type
+      ->alterHtml('~/af/fields/afLocationInput.html', function($doc, $path) {
+        $defaultDistanceUnit = \CRM_Utils_Address::getDefaultDistanceUnit();
+        pq($doc)->find('select[ng-model="$ctrl.values.distance_unit"]')->attr('ng-init', "\$ctrl.values.distance_unit = \$ctrl.values.distance_unit || '$defaultDistanceUnit'");
+      })
       ->alterHtml(';\\.aff\\.html$;', function($doc, $path) {
         try {
           $module = \Civi::service('angular')->getModule(basename($path, '.aff.html'));
@@ -37,22 +44,28 @@ class AfformMetadataInjector {
         catch (\Exception $e) {
         }
 
+        $entities = [];
         $blockEntity = $meta['join_entity'] ?? $meta['entity_type'] ?? NULL;
         if (!$blockEntity) {
           $entities = self::getFormEntities($doc);
         }
 
         // Each field can be nested within a fieldset, a join or a block
+        /** @var \DOMElement $afField */
         foreach (pq('af-field', $doc) as $afField) {
-          /** @var \DOMElement $afField */
+          if ($afField->getAttribute('name') === '') {
+            // "extra" fields have no associated entity
+            self::fillExtraFieldMetadata($afField, $entities);
+            continue;
+          }
           $action = 'create';
           $joinName = pq($afField)->parents('[af-join]')->attr('af-join');
           if ($joinName) {
-            self::fillFieldMetadata($joinName, $action, $afField);
+            self::fillFieldMetadata($joinName, $action, $afField, $entities);
             continue;
           }
           if ($blockEntity) {
-            self::fillFieldMetadata($blockEntity, $action, $afField);
+            self::fillFieldMetadata($blockEntity, $action, $afField, $entities);
             continue;
           }
           // Not a block or a join, get metadata from fieldset
@@ -72,7 +85,7 @@ class AfformMetadataInjector {
             }
             $entityType = $entities[$entityName]['type'];
           }
-          self::fillFieldMetadata($entityType, $action, $afField);
+          self::fillFieldMetadata($entityType, $action, $afField, $entities);
         }
       });
     $e->angular->add($changeSet);
@@ -94,27 +107,37 @@ class AfformMetadataInjector {
     return NULL;
   }
 
+  private static function getFieldDefn(\DOMElement $afField): ?array {
+    $existingFieldDefn = trim(pq($afField)->attr('defn') ?: '');
+    if ($existingFieldDefn && $existingFieldDefn[0] != '{') {
+      // If it's not an object, can't parse it.
+      return NULL;
+    }
+
+    return $existingFieldDefn ? \CRM_Utils_JS::getRawProps($existingFieldDefn) : [];
+  }
+
   /**
    * Merge a field's definition with whatever's already in the markup
    *
    * @param \DOMElement $afField
    * @param array $fieldInfo
+   * @param array $entities
    * @throws \CRM_Core_Exception
    * @throws \Civi\API\Exception\NotImplementedException
    */
-  public static function setFieldMetadata(\DOMElement $afField, array $fieldInfo):void {
+  public static function setFieldMetadata(\DOMElement $afField, array $fieldInfo, array $entities = []):void {
     $deep = ['input_attrs'];
     // Defaults for attributes not in spec
     $fieldInfo['search_range'] = FALSE;
 
-    $existingFieldDefn = trim(pq($afField)->attr('defn') ?: '');
-    if ($existingFieldDefn && $existingFieldDefn[0] != '{') {
-      // If it's not an object, don't mess with it.
+    // Get field defn from afform markup
+    $fieldDefn = self::getFieldDefn($afField);
+    if (!is_array($fieldDefn)) {
+      // If it's not an array, don't mess with it.
       return;
     }
 
-    // Get field defn from afform markup
-    $fieldDefn = $existingFieldDefn ? \CRM_Utils_JS::getRawProps($existingFieldDefn) : [];
     // Uses input type set on the form if specified (else falls back to the input type in the field spec)
     $inputType = !empty($fieldDefn['input_type']) ? \CRM_Utils_JS::decode($fieldDefn['input_type']) : ($fieldInfo['input_type'] ?? 'Text');
     // On a search form, search_range will present a pair of fields (or possibly 3 fields for date select + range)
@@ -156,7 +179,7 @@ class AfformMetadataInjector {
     if ($inputType === 'Select' || $inputType === 'ChainSelect') {
       $fieldInfo['input_attrs']['placeholder'] = E::ts('Select');
     }
-    elseif ($inputType === 'EntityRef' && !empty($fieldInfo['fk_entity']) && empty($field['input_attrs']['placeholder'])) {
+    elseif ($inputType === 'EntityRef' && !empty($fieldInfo['fk_entity']) && empty($fieldInfo['input_attrs']['placeholder'])) {
       $info = civicrm_api4('Entity', 'get', [
         'where' => [['name', '=', $fieldInfo['fk_entity']]],
         'checkPermissions' => FALSE,
@@ -176,6 +199,25 @@ class AfformMetadataInjector {
           $dateOptions = array_merge([['id' => '{}', 'label' => E::ts('Choose Date Range')]], $dateOptions);
         }
         $fieldInfo['options'] = $dateOptions;
+      }
+    }
+
+    // Handle EntityRef fields set to select a form contact
+    if ($fieldInfo['input_type'] === 'EntityRef' && $inputType === 'Select') {
+      $fkEntity = $fieldInfo['fk_entity'] ?? NULL;
+      $fieldInfo['data_type'] = 'String';
+      if ($fkEntity) {
+        $allowedTypes = $fkEntity === 'Contact' ? \CRM_Contact_BAO_ContactType::basicTypes(TRUE) : [$fkEntity];
+        $options = [];
+        foreach ($entities as $name => $entity) {
+          if (in_array($entity['type'], $allowedTypes)) {
+            $options[] = [
+              'id' => $name,
+              'label' => $entity['label'],
+            ];
+          }
+        }
+        $fieldInfo['options'] = $options;
       }
     }
 
@@ -214,7 +256,7 @@ class AfformMetadataInjector {
 
     foreach ($fieldInfo as $name => $prop) {
       // Merge array props 1 level deep
-      if (in_array($name, $deep) && !empty($fieldDefn[$name])) {
+      if (in_array($name, $deep) && !empty($fieldDefn[$name]) && is_array($prop)) {
         $fieldDefn[$name] = \CRM_Utils_JS::writeObject(\CRM_Utils_JS::getRawProps($fieldDefn[$name]) + array_map(['\CRM_Utils_JS', 'encode'], $prop));
       }
       elseif (!isset($fieldDefn[$name])) {
@@ -230,9 +272,10 @@ class AfformMetadataInjector {
    * @param string|array $entityNames
    * @param string $action
    * @param \DOMElement $afField
+   * @param array $entities
    * @throws \CRM_Core_Exception
    */
-  private static function fillFieldMetadata($entityNames, string $action, \DOMElement $afField):void {
+  private static function fillFieldMetadata($entityNames, string $action, \DOMElement $afField, array $entities = []):void {
     $fieldName = $afField->getAttribute('name');
 
     // for magic munged fields like display_name,sort_name,email_primary.email
@@ -246,8 +289,19 @@ class AfformMetadataInjector {
     $fieldInfo = self::getFieldMetadata($entityNames, $action, $fieldName);
     // Merge field definition data with whatever's already in the markup.
     if ($fieldInfo) {
-      self::setFieldMetadata($afField, $fieldInfo);
+      self::setFieldMetadata($afField, $fieldInfo, $entities);
     }
+  }
+
+  public static function fillExtraFieldMetadata(\DOMElement $afField, array $entities = []) {
+    $fieldDefn = self::getFieldDefn($afField);
+    $inputType = \CRM_Utils_JS::decode($fieldDefn['input_type']);
+    $typeInfo = Utils::getInputTypes()[$inputType] ?? [];
+    $fieldInfo = ($typeInfo['extra_defn'] ?? []) + [
+      'input_type' => $inputType,
+      'data_type' => 'String',
+    ];
+    self::setFieldMetadata($afField, $fieldInfo, $entities);
   }
 
   private static function getFormEntities(\phpQueryObject $doc) {
@@ -255,6 +309,7 @@ class AfformMetadataInjector {
     foreach ($doc->find('af-entity') as $afmModelProp) {
       $entities[$afmModelProp->getAttribute('name')] = [
         'type' => $afmModelProp->getAttribute('type'),
+        'label' => $afmModelProp->getAttribute('label') ?: $afmModelProp->getAttribute('name'),
       ];
     }
     return $entities;

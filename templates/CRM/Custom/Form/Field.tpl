@@ -21,6 +21,10 @@
       <td class="label">{$form.data_type.label}</td>
       <td class="html-adjust">{$form.data_type.html}</td>
     </tr>
+    <tr class="crm-custom-field-form-block-file_is_public">
+      <td class="label">{$form.file_is_public.label} {help id="file_is_public"}</td>
+      <td class="html-adjust">{$form.file_is_public.html}</td>
+    </tr>
     <tr class="crm-custom-field-form-block-html_type">
       <td class="label">{$form.html_type.label}</td>
       <td class="html-adjust">{$form.html_type.html}</td>
@@ -32,6 +36,17 @@
     <tr class="crm-custom-field-form-block-fk_entity_on_delete">
       <td class="label">{$form.fk_entity_on_delete.label} <span class="crm-marker">*</span></td>
       <td class="html-adjust">{$form.fk_entity_on_delete.html}</td>
+    </tr>
+    <tr class="crm-custom-field-form-block-placeholder">
+      <td class="label">{$form.placeholder.label}</td>
+      <td class="html-adjust">
+        {$form.placeholder.html}
+        <span class="description">{ts}Leave blank to use the default placeholder.{/ts}</span>
+      </td>
+    </tr>
+    <tr class="crm-custom-field-form-block-control_field" style="display:none">
+      <td class="label">{$form.control_field.label}</td>
+      <td class="html-adjust">{$form.control_field.html}</td>
     </tr>
     <tr class="crm-custom-field-form-block-serialize">
       <td class="label">{$form.serialize.label}</td>
@@ -80,7 +95,9 @@
           {ts}Filter search results for this field using API-style parameters{/ts}
           (<code>field=value&another_field=val1,val2</code>).<br>
           {ts}EXAMPLE (Contact entity): To list Students in "Volunteers" or "Supporters" groups:{/ts}
-          <code>contact_sub_type=Student&groups:name=Volunteers,Supporters</code>
+          <code>contact_sub_type=Student&groups:name=Volunteers,Supporters</code><br>
+          {ts}For filters this simple syntax can't express (multiple fields combined with OR, other operators, etc), paste a JSON-encoded `where` clause built in the API Explorer instead, e.g.{/ts}
+          <code>[["contact_sub_type", "=", "Student"], ["groups:name", "IN", ["Volunteers", "Supporters"]]]</code>
           {docURL page="dev/api"}
         </span>
       </td>
@@ -160,63 +177,76 @@
 {literal}
 <script type="text/javascript">
   CRM.$(function($) {
-    var _ = CRM._,
+    const
       $form = $('form.{/literal}{$form.formClass}{literal}'),
-      dataToHTML = {/literal}{$dataToHTML|@json_encode}{literal},
+      dataToHTML = {/literal}{$dataToHTML|json}{literal},
       originalHtmlType = '{/literal}{$originalHtmlType}{literal}',
       existingMultiValueCount = {/literal}{if empty($existingMultiValueCount)}null{else}{$existingMultiValueCount}{/if}{literal},
       originalSerialize = {/literal}{if empty($originalSerialize)}false{else}true{/if}{literal},
-      htmlTypes = CRM.utils.getOptions($('#html_type', $form));
+      htmlTypes = CRM.utils.getOptions($('#html_type', $form)),
+      htmlTypesWithOptionalSerialize = {/literal}{$htmlTypesWithOptionalSerialize|json}{literal},
+      htmlTypesWithMandatorySerialize = {/literal}{$htmlTypesWithMandatorySerialize|json}{literal},
+      dataTypesWithoutSerialize = {/literal}{$dataTypesWithoutSerialize|json}{literal};
+
+    // Vars used by makeDefaultValueField()
+    let oldDataType = null,
+      oldSerialize = null,
+      oldHasOptionGroup = null,
+      oldOptionGroupId = null;
 
     function onChangeDataType() {
-      var dataType = $(this).val(),
-        allowedHtmlTypes = _.filter(htmlTypes, function(type) {
-          return _.includes(dataToHTML[dataType], type.key);
-        });
+      const dataType = $('#data_type', $form).val();
+      const allowedHtmlTypes = htmlTypes.filter(type =>
+        dataToHTML[dataType].includes(type.key)
+      );
       CRM.utils.setOptions($('#html_type', $form), allowedHtmlTypes);
       if (!$('#html_type', $form).val()) {
         $('#html_type', $form).val(dataToHTML[dataType][0]).change();
       }
       // Hide html_type if there is only one option
       $('.crm-custom-field-form-block-html_type').toggle(allowedHtmlTypes.length > 1);
-      customOptionHtmlType(dataType);
-      makeDefaultValueField(dataType);
+      customOptionHtmlType();
 
       // Show/hide entityReference selector
       $('.crm-custom-field-form-block-fk_entity').toggle(dataType === 'EntityReference');
       $('.crm-custom-field-form-block-fk_entity_on_delete').toggle(dataType === 'EntityReference');
+      $('.crm-custom-field-form-block-placeholder').toggle(dataType === 'EntityReference');
+
+      // Toggle file access
+      $('tr.crm-custom-field-form-block-file_is_public').toggle(dataType === 'File');
+
+      // Currency selector
+      $('.crm-custom-field-form-block-control_field').toggle(dataType === 'Money');
     }
 
     function onChangeHtmlType() {
-      var htmlType = $(this).val(),
-        dataType = $('#data_type', $form).val();
+      const htmlType = $('#html_type', $form).val();
+      const dataType = $('#data_type', $form).val();
 
-      if (htmlType === 'CheckBox' || htmlType === 'Radio') {
-        $('#serialize', $form).prop('checked', htmlType === 'CheckBox');
+      if (htmlTypesWithMandatorySerialize.includes(htmlType)) {
+        $('#serialize', $form).prop('checked', true);
       }
-      else {
+      else if (!htmlTypesWithOptionalSerialize.includes(htmlType)) {
+        $('#serialize', $form).prop('checked', false);
+      }
+
+      if (!['CheckBox', 'Radio'].includes(htmlType)) {
         $("#options_per_line", $form).val('');
       }
 
       showSearchRange(dataType);
-      customOptionHtmlType(dataType);
+      customOptionHtmlType();
     }
 
-    $('#data_type', $form).each(onChangeDataType).change(onChangeDataType);
-    $('#html_type', $form).each(onChangeHtmlType).change(onChangeHtmlType);
-
     function showSearchRange(dataType) {
-      if (_.includes(['Date', 'Int', 'Float', 'Money'], dataType)) {
-        $("#searchByRange", $form).show();
-      } else {
-        $("#searchByRange", $form).hide();
-      }
+      const showRange = ['Date', 'Int', 'Float', 'Money'].includes(dataType);
+      $("#searchByRange", $form).toggle(showRange);
     }
 
     function toggleContactRefFilter(e) {
-      var setSelected = $(this).attr('href');
+      let setSelected = $(this).attr('href');
       if (!setSelected) {
-        setSelected =  $('#filter_selected').val();
+        setSelected = $('#filter_selected').val();
       } else {
         $('#filter_selected').val(setSelected.slice(1));
       }
@@ -231,9 +261,16 @@
     }
     $('.toggle-contact-ref-mode', $form).click(toggleContactRefFilter);
 
-    function customOptionHtmlType(dataType) {
-      var htmlType = $("#html_type", $form).val(),
-        serialize = $("#serialize", $form).is(':checked');
+    function hasOptionGroup() {
+      const dataType = $("#data_type", $form).val();
+      const htmlType = $("#html_type", $form).val();
+      return (['String', 'Int', 'Float', 'Money'].includes(dataType)) && !['Text', 'Hidden'].includes(htmlType);
+    }
+
+    function customOptionHtmlType() {
+      const dataType = $("#data_type", $form).val();
+      const htmlType = $("#html_type", $form).val();
+      const serialize = $("#serialize", $form).is(':checked');
 
       if (!htmlType) {
         return;
@@ -248,16 +285,17 @@
         $('#field_advance_filter, #contact_reference_group', $form).hide();
       }
 
-      if (_.includes(['String', 'Int', 'Float', 'Money'], dataType)) {
-        if (!['Text', 'Hidden'].includes(htmlType)) {
-          $("#showoption, #searchable", $form).show();
-          $("#hideDefault, #searchByRange", $form).hide();
-        } else {
-          $("#showoption").hide();
+      if (hasOptionGroup()) {
+        $("#showoption", $form).show();
+        $("#searchByRange", $form).hide();
+        const reuseOptions = $('[name=option_type]:checked', $form).val() === '2';
+        $("#hideDefault", $form).toggle(reuseOptions);
+      }
+      else {
+        $("#showoption", $form).hide();
+        if (['String', 'Int', 'Float', 'Money'].includes(dataType)) {
           $("#hideDefault, #searchable", $form).show();
-        }
-      } else {
-        if (dataType === 'File') {
+        } else if (dataType === 'File') {
           $("#default_value", $form).val('');
           $("#hideDefault, #searchable", $form).hide();
         } else if (dataType === 'ContactReference') {
@@ -265,10 +303,9 @@
         } else {
           $("#hideDefault, #searchable", $form).show();
         }
-        $("#showoption").hide();
       }
 
-      if (_.includes(['String', 'Int', 'Float', 'Money'], dataType) && !['Text', 'Hidden'].includes(htmlType)) {
+      if (['String', 'Int', 'Float', 'Money'].includes(dataType) && !['Text', 'Hidden'].includes(htmlType)) {
         if (serialize) {
           $('div[id^=checkbox]', '#optionField').show();
           $('div[id^=radio]', '#optionField').hide();
@@ -286,40 +323,86 @@
 
       $("#noteColumns, #noteRows, #noteLength", $form).toggle(dataType === 'Memo');
 
-      $(".crm-custom-field-form-block-serialize", $form).toggle(htmlType === 'Select' || htmlType === 'Autocomplete-Select' && dataType !== 'EntityReference');
+      $(".crm-custom-field-form-block-serialize", $form).toggle(htmlTypesWithOptionalSerialize.includes(htmlType) && !dataTypesWithoutSerialize.includes(dataType));
+
+      makeDefaultValueField(dataType);
     }
 
-    function makeDefaultValueField(dataType) {
-      var field = $('#default_value', $form);
+    function makeDefaultValueField(newDataType) {
+      const field = $('#default_value', $form);
+      const newSerialize = $("#serialize", $form).is(':checked');
+      const newHasOptionGroup = hasOptionGroup();
+      const newOptionGroupId = $('[name=option_group_id]', $form).val();
+
+      // First, check if this function needs to run by comparing old values with new values
+      if (oldDataType === newDataType && oldSerialize === newSerialize && oldHasOptionGroup === newHasOptionGroup && oldOptionGroupId === newOptionGroupId) {
+        return;
+      }
+      // Store values for next time to ensure function doesn't run more often than necessary
+      // This prevents rapidly creating/destroying/creating/destroying select2 element which can cause race condition errors
+      oldDataType = newDataType;
+      oldSerialize = newSerialize;
+      oldHasOptionGroup = newHasOptionGroup;
+      oldOptionGroupId = newOptionGroupId;
+
+      const autocompeteApiParams = {
+        formName: 'qf:{/literal}{$form.formClass}{literal}',
+        fieldName: 'CustomField.default_value',
+      };
+      const autocompleteSelectParams = {
+        multiple: newSerialize,
+      };
       field.crmDatepicker('destroy');
-      field.crmSelect2('destroy');
-      switch (dataType) {
+      field.crmAutocomplete('destroy');
+      switch (newDataType) {
         case 'Date':
           field.crmDatepicker({date: 'yy-mm-dd', time: false});
-          break;
+          return;
 
         case 'Boolean':
           field.crmSelect2({data: [{id: '1', text: ts('Yes')}, {id: '0', text: ts('No')}], placeholder: ' '});
-          break;
+          return;
 
         case 'Country':
-          field.crmEntityRef({entity: 'Country'});
-          break;
+          field.crmAutocomplete('Country', autocompeteApiParams, autocompleteSelectParams);
+          return;
 
         case 'StateProvince':
-          field.crmEntityRef({entity: 'StateProvince', api: {description_field: ['country_id.name']}});
-          break;
+          field.crmAutocomplete('StateProvince', autocompeteApiParams, autocompleteSelectParams);
+          return;
+
+        case 'Currency':
+          autocompeteApiParams.key = 'name';
+          field.crmAutocomplete('Currency', autocompeteApiParams, autocompleteSelectParams);
+          return;
+      }
+      if (newHasOptionGroup && newOptionGroupId) {
+        autocompeteApiParams.filters = {option_group_id: newOptionGroupId};
+        autocompeteApiParams.key = 'value';
+        field.crmAutocomplete('OptionValue', autocompeteApiParams, autocompleteSelectParams);
       }
     }
 
-    $('#is_searchable, #serialize', $form).change(onChangeHtmlType);
+    // Watch changes
+    $('#html_type, #is_searchable', $form).change(onChangeHtmlType);
+    $('#data_type', $form).change(onChangeDataType);
+
+    // Set initial form state
+    onChangeDataType();
+    onChangeHtmlType();
+
+    // When changing the set of options, clear & rebuild the default value selector
+    $('[name=option_type],[name=option_group_id],[name=serialize]', $form).click(() => {
+      $('#default_value', $form).val('');
+      customOptionHtmlType();
+    });
 
     $form.submit(function() {
-      var htmlType = $('#html_type', $form).val(),
-        serialize = $("#serialize", $form).is(':checked'),
-        htmlTypeLabel = (serialize && _.includes(['Select', 'Autocomplete-Select'], htmlType)) ? ts('Multi-Select') : _.find(htmlTypes, {key: htmlType}).value;
+      const htmlType = $('#html_type', $form).val();
+      const serialize = $("#serialize", $form).is(':checked');
+      let htmlTypeLabel = (serialize && ['Select', 'Autocomplete-Select'].includes(htmlType)) ? ts('Multi-Select') : htmlTypes.find(item => item.key === htmlType).value;
       if (originalHtmlType && (originalHtmlType !== htmlType || originalSerialize !== serialize)) {
-        var origHtmlTypeLabel = (originalSerialize && originalHtmlType === 'Select') ? ts('Multi-Select') : _.find(htmlTypes, {key: originalHtmlType}).value;
+        let origHtmlTypeLabel = (originalSerialize && originalHtmlType === 'Select') ? ts('Multi-Select') : htmlTypes.find(item => item.key === originalHtmlType).value;
         if (originalSerialize && !serialize && existingMultiValueCount) {
           return confirm(ts('WARNING: Changing this multivalued field to singular will result in the loss of data!')
             + "\n" + ts('%1 existing records contain multiple values - the data in each of these fields will be truncated to a single value.', {1: existingMultiValueCount})
@@ -335,6 +418,6 @@
 {* Give link to view/edit option group *}
 {if $action eq 2 && !empty($hasOptionGroup)}
   <div class="action-link">
-    {crmButton p="civicrm/admin/custom/group/field/option" q="reset=1&action=browse&fid=`$id`&gid=`$gid`" icon="pencil"}{ts}View / Edit Multiple Choice Options{/ts}{/crmButton}
+    {crmButton p="civicrm/admin/custom/group/field/options" f="?option_group_id=`$optionGroupId`" icon="pencil"}{ts}View / Edit Multiple Choice Options{/ts}{/crmButton}
   </div>
 {/if}

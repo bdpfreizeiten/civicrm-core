@@ -33,7 +33,7 @@
         });
 
         function setDateType() {
-          if (_.findWhere(ctrl.dateRanges, {id: ctrl.value})) {
+          if (ctrl.dateRanges.find((dateRange) => dateRange.id === ctrl.value)) {
             ctrl.dateType = 'range';
           } else if (ctrl.value === 'now') {
             ctrl.dateType = 'now';
@@ -133,7 +133,7 @@
       this.getTemplate = function() {
         const field = getField();
 
-        if (_.includes(['LIKE', 'NOT LIKE', 'REGEXP', 'NOT REGEXP', 'REGEXP BINARY', 'NOT REGEXP BINARY'], ctrl.op)) {
+        if (['LIKE', 'NOT LIKE', 'REGEXP', 'NOT REGEXP', 'REGEXP BINARY', 'NOT REGEXP BINARY'].includes(ctrl.op)) {
           return '~/crmSearchTasks/crmSearchInput/text.html';
         }
 
@@ -150,7 +150,11 @@
           return '~/crmSearchTasks/crmSearchInput/boolean.html';
         }
 
-        if (!_.includes(['>', '<', '>=', '<='], ctrl.op)) {
+        if (field.input_type === 'Color') {
+          return '~/crmSearchTasks/crmSearchInput/color.html';
+        }
+
+        if (!['>', '<', '>=', '<='].includes(ctrl.op)) {
           // Only use option list if the field has a "name" suffix
           if (field.options && (!field.suffixes || field.suffixes.includes('name'))) {
             return '~/crmSearchTasks/crmSearchInput/select.html';
@@ -172,6 +176,10 @@
           return '~/crmSearchTasks/crmSearchInput/email.html';
         }
 
+        if (field.input_type === 'TextArea') {
+          return '~/crmSearchTasks/crmSearchInput/textArea.html';
+        }
+
         return '~/crmSearchTasks/crmSearchInput/text.html';
       };
 
@@ -185,7 +193,8 @@
       }
 
       function isDateField(field) {
-        return field.data_type === 'Date' || field.data_type === 'Timestamp';
+        // Partial date functions get special handling to be treated as dates
+        return field.category === 'partial_date' || field.data_type === 'Date' || field.data_type === 'Timestamp';
       }
 
     }

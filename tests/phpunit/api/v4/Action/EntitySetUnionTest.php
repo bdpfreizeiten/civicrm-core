@@ -86,6 +86,45 @@ class EntitySetUnionTest extends Api4TestBase implements TransactionalInterface 
     // Correct pseudoconstants should have been looked up for each row
     $this->assertEquals(['Access Control', 'Mailing List'], $result[0]['type']);
     $this->assertEquals(['Contact', 'Activity'], $result[1]['type']);
+
+    // Same as above but without the alias
+    $result = EntitySet::get(FALSE)
+      ->addSelect('title', 'description', 'group_type:name')
+      ->addSet('UNION ALL', Group::get()
+        ->addSelect('title', 'description', 'group_type:name')
+        ->addWhere('title', 'IN', ['1G', '2>G', '3G'])
+      )
+      ->addSet('UNION ALL', Tag::get()
+        ->addSelect('name', 'description', 'used_for:name')
+        ->addWhere('name', 'IN', ['1T', '2<T', '3T'])
+      )
+      ->addOrderBy('title')
+      ->addWhere('title', 'LIKE', '3%')
+      ->setDebug(TRUE)
+      ->execute();
+    $this->assertCount(2, $result);
+    // Correct pseudoconstants should have been looked up for each row
+    $this->assertEquals(['Access Control', 'Mailing List'], $result[0]['group_type:name']);
+    $this->assertEquals(['Contact', 'Activity'], $result[1]['group_type:name']);
+
+    // Same as above but without the SELECT
+    $result = EntitySet::get(FALSE)
+      ->addSet('UNION ALL', Group::get()
+        ->addSelect('title', 'description', 'group_type:name')
+        ->addWhere('title', 'IN', ['1G', '2>G', '3G'])
+      )
+      ->addSet('UNION ALL', Tag::get()
+        ->addSelect('name', 'description', 'used_for:name')
+        ->addWhere('name', 'IN', ['1T', '2<T', '3T'])
+      )
+      ->addOrderBy('title')
+      ->addWhere('title', 'LIKE', '3%')
+      ->setDebug(TRUE)
+      ->execute();
+    $this->assertCount(2, $result);
+    // Correct pseudoconstants should have been looked up for each row
+    $this->assertEquals(['Access Control', 'Mailing List'], $result[0]['group_type:name']);
+    $this->assertEquals(['Contact', 'Activity'], $result[1]['group_type:name']);
   }
 
   public function testGroupByUnionSet(): void {
@@ -189,6 +228,204 @@ class EntitySetUnionTest extends Api4TestBase implements TransactionalInterface 
     $this->assertFalse($result[0]['is_parent']);
     $this->assertEquals('Household', $result[0]['parent_id:name']);
     $this->assertEquals('Household', $result[1]['name']);
+  }
+
+  public function testGroupByInsideSet(): void {
+    $contacts = $this->saveTestRecords('Contact', ['records' => 4])->column('id');
+    $relationships = $this->saveTestRecords('Relationship', [
+      'records' => [
+        ['contact_id_a' => $contacts[0], 'contact_id_b' => $contacts[1]],
+        ['contact_id_a' => $contacts[0], 'contact_id_b' => $contacts[2]],
+        ['contact_id_a' => $contacts[1], 'contact_id_b' => $contacts[2]],
+        ['contact_id_a' => $contacts[2], 'contact_id_b' => $contacts[3]],
+      ],
+    ]);
+
+    // Each set uses addGroupBy internally to count relationships per contact,
+    // once from the "a" side and once from the "b" side, then the union combines them.
+    // Column names come from the first set: contact_id_a, rel_count, side.
+    $result = EntitySet::get(FALSE)
+      ->addSet('UNION ALL', Relationship::get()
+        ->addSelect('contact_id_a', 'COUNT(id) AS rel_count', '"a" AS side')
+        ->addWhere('id', 'IN', $relationships->column('id'))
+        ->addGroupBy('contact_id_a')
+      )
+      ->addSet('UNION ALL', Relationship::get()
+        ->addSelect('contact_id_b', 'COUNT(id)', '"b" AS side')
+        ->addWhere('id', 'IN', $relationships->column('id'))
+        ->addGroupBy('contact_id_b')
+      )
+      ->addOrderBy('contact_id_a')
+      ->addOrderBy('side')
+      ->execute();
+
+    // contacts[0] has 2 relationships on the "a" side
+    // contacts[1] has 1 relationship on the "a" side and 1 on the "b" side
+    // contacts[2] has 1 relationship on the "a" side and 2 on the "b" side
+    // contacts[3] has 1 relationship on the "b" side
+    $this->assertCount(6, $result);
+
+    $byContactAndSide = [];
+    foreach ($result as $row) {
+      $byContactAndSide[$row['contact_id_a']][$row['side']] = $row['rel_count'];
+    }
+
+    $this->assertEquals(2, $byContactAndSide[$contacts[0]]['a']);
+    $this->assertArrayNotHasKey('b', $byContactAndSide[$contacts[0]]);
+
+    $this->assertEquals(1, $byContactAndSide[$contacts[1]]['a']);
+    $this->assertEquals(1, $byContactAndSide[$contacts[1]]['b']);
+
+    $this->assertEquals(1, $byContactAndSide[$contacts[2]]['a']);
+    $this->assertEquals(2, $byContactAndSide[$contacts[2]]['b']);
+
+    $this->assertArrayNotHasKey('a', $byContactAndSide[$contacts[3]]);
+    $this->assertEquals(1, $byContactAndSide[$contacts[3]]['b']);
+  }
+
+  public function testUnionWithJoinsInEachSet(): void {
+    // Create 3 contacts with distinct first names so we can identify them.
+    $contacts = $this->saveTestRecords('Contact', [
+      'records' => [
+        ['first_name' => 'Alice'],
+        ['first_name' => 'Bob'],
+        ['first_name' => 'Carol'],
+      ],
+    ])->column('id');
+
+    // Alice -> Bob, Bob -> Carol
+    $this->saveTestRecords('Relationship', [
+      'records' => [
+        ['contact_id_a' => $contacts[0], 'contact_id_b' => $contacts[1]],
+        ['contact_id_a' => $contacts[1], 'contact_id_b' => $contacts[2]],
+      ],
+    ]);
+
+    // Union the "a-side" contact name from set 1 with the "b-side" contact name
+    // from set 2. Each set uses an addJoin to look up the contact's first_name.
+    // The union should return one row per relationship endpoint:
+    // Alice (a-side of rel 1), Bob (a-side of rel 2),
+    // Bob (b-side of rel 1), Carol (b-side of rel 2).
+    $result = EntitySet::get(FALSE)
+      ->addSet('UNION ALL', Relationship::get()
+        ->addSelect('contact_id_a', 'contact_a.first_name', '"a" AS side')
+        ->addJoin('Contact AS contact_a', 'INNER', ['contact_id_a', '=', 'contact_a.id'])
+        ->addWhere('contact_id_a', 'IN', $contacts)
+      )
+      ->addSet('UNION ALL', Relationship::get()
+        ->addSelect('contact_id_b', 'contact_b.first_name', '"b" AS side')
+        ->addJoin('Contact AS contact_b', 'INNER', ['contact_id_b', '=', 'contact_b.id'])
+        ->addWhere('contact_id_b', 'IN', $contacts)
+      )
+      ->addOrderBy('contact_a.first_name')
+      ->addOrderBy('side')
+      ->execute();
+
+    $this->assertCount(4, $result);
+
+    $names = array_column((array) $result, 'contact_a.first_name');
+    // Both sides of both relationships appear. Bob appears twice (a-side of
+    // rel 2 and b-side of rel 1).
+    $this->assertContains('Alice', $names);
+    $this->assertContains('Bob', $names);
+    $this->assertContains('Carol', $names);
+
+    // Verify sides are populated correctly from the per-set JOINs.
+    $byNameAndSide = [];
+    foreach ($result as $row) {
+      $byNameAndSide[$row['contact_a.first_name']][$row['side']] = TRUE;
+    }
+    $this->assertArrayHasKey('a', $byNameAndSide['Alice']);
+    $this->assertArrayNotHasKey('b', $byNameAndSide['Alice']);
+    $this->assertArrayHasKey('a', $byNameAndSide['Bob']);
+    $this->assertArrayHasKey('b', $byNameAndSide['Bob']);
+    $this->assertArrayNotHasKey('a', $byNameAndSide['Carol']);
+    $this->assertArrayHasKey('b', $byNameAndSide['Carol']);
+  }
+
+  public function testUnionWithRowCount(): void {
+    $this->saveTestRecords('Group', [
+      'records' => [
+        ['title' => '1G', 'description' => 'Group 1'],
+        ['title' => '2G', 'description' => 'Group 2'],
+      ],
+    ]);
+    $this->saveTestRecords('Tag', [
+      'records' => [
+        ['name' => '1T', 'description' => 'Tag 1'],
+        ['name' => '2T', 'description' => 'Tag 2'],
+        ['name' => '3T', 'description' => 'Tag 3'],
+      ],
+    ]);
+
+    $result = EntitySet::get(FALSE)
+      ->addSelect('row_count')
+      ->addSet('UNION ALL', Group::get()
+        ->addSelect('title')
+        ->addWhere('title', 'IN', ['1G', '2G'])
+      )
+      ->addSet('UNION ALL', Tag::get()
+        ->addSelect('name')
+        ->addWhere('name', 'IN', ['1T', '2T', '3T'])
+      )
+      ->execute();
+
+    $this->assertEquals(0, $result->countFetched());
+    $this->assertEquals(5, $result->rowCount);
+    $this->assertEquals(5, $result->countMatched());
+
+    // Test selecting row_count in conjunction with other fields
+    $resultWithFields = EntitySet::get(FALSE)
+      ->addSelect('title', 'row_count')
+      ->addSet('UNION ALL', Group::get()
+        ->addSelect('title')
+        ->addWhere('title', 'IN', ['1G', '2G'])
+      )
+      ->addSet('UNION ALL', Tag::get()
+        ->addSelect('name')
+        ->addWhere('name', 'IN', ['1T', '2T', '3T'])
+      )
+      ->addOrderBy('title')
+      ->setLimit(2)
+      ->execute();
+
+    $this->assertEquals(2, $resultWithFields->countFetched());
+    $this->assertEquals(5, $resultWithFields->rowCount);
+    $this->assertEquals(5, $resultWithFields->countMatched());
+    $this->assertEquals('1G', $resultWithFields[0]['title']);
+    $this->assertEquals('1T', $resultWithFields[1]['title']);
+  }
+
+  public function testUnionWithNullPadding(): void {
+    $indName = uniqid('IND1');
+    $hhName = uniqid('HH1');
+    $this->createTestRecord('ContactType', [
+      'parent_id:name' => 'Individual',
+      'name' => $indName,
+      'label' => 'Individual sub',
+    ]);
+    $this->createTestRecord('ContactType', [
+      'parent_id:name' => 'Household',
+      'name' => $hhName,
+      'label' => 'Household sub',
+    ]);
+
+    $result = EntitySet::get(FALSE)
+      ->addSet('UNION ALL', ContactType::get()
+        ->addSelect('id', 'name', 'label')
+        ->addWhere('name', '=', $indName)
+      )
+      ->addSet('UNION ALL', ContactType::get()
+        ->setSelect(['id', NULL])
+        ->addWhere('name', '=', $hhName)
+      )
+      ->addOrderBy('id')
+      ->execute();
+
+    $this->assertCount(2, $result);
+    $this->assertEquals('Individual sub', $result[0]['label']);
+    $this->assertNull($result[1]['label']);
+    $this->assertNull($result[1]['name']);
   }
 
 }

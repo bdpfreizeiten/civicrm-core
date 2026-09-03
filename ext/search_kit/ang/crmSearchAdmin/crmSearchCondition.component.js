@@ -88,7 +88,7 @@
         if (!allowedOps && field.data_type === 'Boolean') {
           allowedOps = ['=', '!=', 'IS EMPTY', 'IS NOT NULL', 'IS NULL'];
         }
-        if (!allowedOps && _.includes(['Boolean', 'Float', 'Date'], field.data_type)) {
+        if (!allowedOps && ['Boolean', 'Float', 'Date'].includes(field.data_type)) {
           allowedOps = ['=', '!=', '<', '>', '<=', '>=', 'IN', 'NOT IN', 'BETWEEN', 'NOT BETWEEN', 'IS EMPTY', 'IS NOT EMPTY'];
         }
         if (!allowedOps && (field.data_type === 'Array' || field.serialize)) {
@@ -100,7 +100,7 @@
         const opKey = allowedOps.join();
         if (!ctrl.operators[opKey]) {
           ctrl.operators[opKey] = _.filter(CRM.crmSearchAdmin.operators, function(operator) {
-            return _.includes(allowedOps, operator.key);
+            return allowedOps.includes(operator.key);
           });
         }
         return ctrl.operators[opKey];
@@ -108,7 +108,7 @@
 
       // Ensures clause is using an operator that is allowed for the field
       function updateOperators() {
-        if ((!getOperator() || !_.includes(_.pluck(ctrl.getOperators(), 'key'), getOperator()))) {
+        if ((!getOperator() || !ctrl.getOperators().map((operator) => operator.key).includes(getOperator()))) {
           setOperator(ctrl.getOperators()[0].key);
         }
       }
@@ -127,13 +127,13 @@
             ctrl.clause.push('');
           }
           // Change multi/single value to/from an array
-          const shouldBeArray = _.includes(['IN', 'NOT IN', 'BETWEEN', 'NOT BETWEEN'], getOperator());
-          if (!_.isArray(getValue()) && shouldBeArray) {
+          const shouldBeArray = ['IN', 'NOT IN', 'BETWEEN', 'NOT BETWEEN'].includes(getOperator());
+          if (!Array.isArray(getValue()) && shouldBeArray) {
             setValue([]);
-          } else if (_.isArray(getValue()) && !shouldBeArray) {
+          } else if (Array.isArray(getValue()) && !shouldBeArray) {
             setValue('');
           }
-          if (_.includes(['BETWEEN', 'NOT BETWEEN'], getOperator())) {
+          if (['BETWEEN', 'NOT BETWEEN'].includes(getOperator())) {
             getValue().length = 2;
           }
         }

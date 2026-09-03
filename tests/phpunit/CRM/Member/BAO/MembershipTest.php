@@ -13,6 +13,7 @@ use Civi\Api4\Membership;
 use Civi\Api4\MembershipLog;
 use Civi\Api4\MembershipStatus;
 use Civi\Test\ContributionPageTestTrait;
+use Civi\Api4\Payment;
 
 /**
  * Class CRM_Member_BAO_MembershipTest
@@ -223,7 +224,7 @@ class CRM_Member_BAO_MembershipTest extends CiviUnitTestCase {
       'status_id:name' => 'Current',
     ], 'override');
 
-    $membershipId2 = Membership::get()->addWhere('source', '=', 'PaySource')->execute()->single()['id'];;
+    $membershipId2 = Membership::get()->addWhere('source', '=', 'PaySource')->execute()->single()['id'];
 
     $params = ['id' => $membershipId2];
     $values2 = [];
@@ -347,8 +348,8 @@ class CRM_Member_BAO_MembershipTest extends CiviUnitTestCase {
       'source' => 'Payment',
       'is_override' => 1,
       'status_id' => $this->_membershipStatusID,
+      'version' => 4,
     ];
-
     $membership = $this->callAPISuccess('Membership', 'create', $params);
 
     $this->assertEquals('Anderson, Anthony II', CRM_Member_BAO_Membership::sortName($membership['id']));
@@ -489,6 +490,7 @@ class CRM_Member_BAO_MembershipTest extends CiviUnitTestCase {
       'is_override' => 1,
       'status_override_end_date' => date('Ymd'),
       'status_id' => $this->_membershipStatusID,
+      'version' => 4,
     ];
 
     $createdMembershipID = $this->callAPISuccess('Membership', 'create', $params)['id'];
@@ -531,6 +533,7 @@ class CRM_Member_BAO_MembershipTest extends CiviUnitTestCase {
       'source' => 'Payment',
       'is_override' => 1,
       'status_id' => $this->_membershipStatusID,
+      'version' => 4,
     ];
 
     $createdMembershipID = $this->callAPISuccess('Membership', 'create', $params)['id'];
@@ -680,10 +683,16 @@ class CRM_Member_BAO_MembershipTest extends CiviUnitTestCase {
       ],
     ]);
 
-    $this->callAPISuccess('Contribution', 'repeattransaction', [
+    $contribution = $this->callAPISuccess('Contribution', 'repeattransaction', [
       'original_contribution_id' => $contribution['id'],
-      'contribution_status_id' => 'Completed',
     ]);
+    Payment::create(FALSE)
+      ->setNotificationForCompleteOrder(FALSE)
+      ->addValue('contribution_id', $contribution['id'])
+      ->addValue('total_amount', 150)
+      ->addValue('trxn_date', $contribution['values'][$contribution['id']]['receive_date'])
+      ->execute();
+
     $contributions = $this->callAPISuccess('Contribution', 'get', ['sequential' => 1])['values'];
     $this->assertCount(2, $contributions);
     $this->assertEquals('Debit Card', CRM_Core_PseudoConstant::getName('CRM_Contribute_BAO_Contribution', 'payment_instrument_id', $contributions[1]['payment_instrument_id']));
@@ -744,6 +753,7 @@ class CRM_Member_BAO_MembershipTest extends CiviUnitTestCase {
       'source' => 'Payment',
       'is_override' => 1,
       'status_id' => $this->_membershipStatusID,
+      'version' => 4,
     ];
 
     $this->callAPISuccess('Membership', 'create', $params);
@@ -785,6 +795,7 @@ class CRM_Member_BAO_MembershipTest extends CiviUnitTestCase {
       'membership_type_id' => $membershipTypeWithRelationship["id"],
       'contact_id'         => $employerId,
       'status_id'          => $this->_membershipStatusID,
+      'version'            => 4,
     ]);
     $membership = $membership['values'][$membership["id"]];
     $this->assertEquals(0, $this->getRelatedMembershipsCount($membership["id"]), 'Related membership count should be 0.');
@@ -814,6 +825,7 @@ class CRM_Member_BAO_MembershipTest extends CiviUnitTestCase {
     // Update membership by changing its status.
     $otherStatusID = $this->membershipStatusCreate('another status ' . random_int(1, 1000));
     $membership["status_id"] = $otherStatusID;
+    $membership['version'] = 3;
     $this->callAPISuccess("Membership", "create", $membership);
 
     // Assert nothing has changed.
@@ -844,6 +856,7 @@ class CRM_Member_BAO_MembershipTest extends CiviUnitTestCase {
       'contact_id'         => $organizationId,
       'status_id'          => $this->_membershipStatusID,
       'custom_' . $customField['id'] => $customContactId,
+      'version'            => 4,
     ]);
 
     $membership = $membership['values'][$membership["id"]];

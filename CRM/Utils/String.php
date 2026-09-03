@@ -661,36 +661,7 @@ class CRM_Utils_String {
    *   the cleaned up string
    */
   public static function purifyHTML($string) {
-    static $_filter = NULL;
-    if (!$_filter) {
-      $config = HTMLPurifier_Config::createDefault();
-      $config->set('Core.Encoding', 'UTF-8');
-      $config->set('Attr.AllowedFrameTargets', ['_blank', '_self', '_parent', '_top']);
-      // Disable the cache entirely
-      $config->set('Cache.DefinitionImpl', NULL);
-      $config->set('HTML.DefinitionID', 'enduser-customize.html tutorial');
-      $config->set('HTML.DefinitionRev', 1);
-      $config->set('HTML.MaxImgLength', NULL);
-      $config->set('CSS.MaxImgLength', NULL);
-      // Prevent id atrributes from being stripped (useful for e.g. anchors)
-      $config->set('Attr.EnableID', TRUE);
-      $def = $config->maybeGetRawHTMLDefinition();
-      $uri = $config->getDefinition('URI');
-      $uri->addFilter(new CRM_Utils_HTMLPurifier_URIFilter(), $config);
-
-      if (!empty($def)) {
-        $def->addElement('figcaption', 'Block', 'Flow', 'Common');
-        $def->addElement('figure', 'Block', 'Optional: (figcaption, Flow) | (Flow, figcaption) | Flow', 'Common');
-        // Allow `<summary>` and `<details>`
-        $def->addElement('details', 'Block', 'Flow', 'Common', [
-          'open' => new \HTMLPurifier_AttrDef_HTML_Bool('open'),
-        ]);
-        $def->addElement('summary', 'Inline', 'Inline', 'Common');
-      }
-      $_filter = new HTMLPurifier($config);
-    }
-
-    return $_filter->purify($string ?? '');
+    return Civi::service('richtext')->filter('string', $string ?? '');
   }
 
   /**
@@ -780,7 +751,7 @@ class CRM_Utils_String {
   }
 
   /**
-   * This function compares two strings.
+   * @deprecated in 6.19 will be removed around 6.25
    *
    * @param string $strOne
    *   String one.
@@ -793,6 +764,7 @@ class CRM_Utils_String {
    *   TRUE (string are identical); FALSE (strings are not identical)
    */
   public static function compareStr($strOne, $strTwo, $case) {
+    CRM_Core_Error::deprecatedFunctionWarning('strcasecmp');
     if ($case == TRUE) {
       // Convert to lowercase and trim white spaces
       if (strtolower(trim($strOne)) == strtolower(trim($strTwo))) {
@@ -1139,15 +1111,27 @@ class CRM_Utils_String {
    * @return array
    */
   public static function getSquareTokens(string $raw): array {
+    // '?' indicates the token is optional; we might support other qualifiers in the future.
+    $allowedQualifiers = [
+      '?',
+    ];
     $matches = $tokens = [];
     if (str_contains($raw, '[')) {
       preg_match_all('/\\[([^]]+)\\]/', $raw, $matches);
-      foreach (array_unique($matches[1]) as $match) {
-        [$field, $suffix] = array_pad(explode(':', $match), 2, NULL);
-        $tokens[$match] = [
-          'token' => "[$match]",
+      foreach (array_unique($matches[1]) as $tokenStr) {
+        $tokenContent = $tokenStr;
+        $qualifier = '';
+        if (in_array($tokenStr[0], $allowedQualifiers)) {
+          $qualifier = $tokenStr[0];
+          $tokenContent = substr($tokenStr, 1);
+        }
+        [$field, $suffix] = array_pad(explode(':', $tokenContent), 2, NULL);
+        $tokens[$tokenStr] = [
+          'token' => "[$tokenStr]",
+          'content' => $tokenContent,
           'field' => $field,
           'suffix' => $suffix,
+          'qualifier' => $qualifier,
         ];
       }
     }

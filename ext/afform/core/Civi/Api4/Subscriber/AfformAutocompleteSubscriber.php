@@ -29,7 +29,7 @@ class AfformAutocompleteSubscriber extends AutoService implements EventSubscribe
   /**
    * @return array
    */
-  public static function getSubscribedEvents() {
+  public static function getSubscribedEvents(): array {
     return [
       'civi.api.prepare' => ['onApiPrepare', 200],
     ];
@@ -131,6 +131,7 @@ class AfformAutocompleteSubscriber extends AutoService implements EventSubscribe
       }
     }
 
+    $apiRequest->setCheckPermissions(($formField['security'] ?? NULL) !== 'FBAC');
     $apiRequest->setSavedSearch($formField['saved_search'] ?? NULL);
     $apiRequest->setDisplay($formField['search_display'] ?? NULL);
   }

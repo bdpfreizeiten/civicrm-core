@@ -59,7 +59,7 @@ class Test {
   public static function dsn($part = NULL) {
     if (!isset(self::$singletons['dsn'])) {
       require_once "DB.php";
-      $dsn = \CRM_Utils_SQL::autoSwitchDSN(CIVICRM_DSN);
+      $dsn = \CRM_Utils_SQL::autoSwitchDSN(\CIVICRM_DSN);
       self::$singletons['dsn'] = \DB::parseDSN($dsn);
     }
 
@@ -84,10 +84,12 @@ class Test {
       $dsninfo = self::dsn();
       $host = $dsninfo['hostspec'];
       $port = @$dsninfo['port'];
+      // PHP 8.4 introduced Pdo\Mysql constants, and PHP 8.5 strongly prefers the new constants. But they're invalid on PHP 8.1-8.3.
+      $bufferedQuery = defined('Pdo\Mysql::ATTR_USE_BUFFERED_QUERY') ? \Pdo\Mysql::ATTR_USE_BUFFERED_QUERY : PDO::MYSQL_ATTR_USE_BUFFERED_QUERY;
       try {
         self::$singletons['pdo'] = new PDO("mysql:host={$host}" . ($port ? ";port=$port" : ""),
           $dsninfo['username'], $dsninfo['password'],
-          [PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => TRUE]
+          [$bufferedQuery => TRUE]
         );
       }
       catch (PDOException $e) {
@@ -130,7 +132,12 @@ class Test {
       }, 'reset')
       ->callback(function ($ctx) {
         \Civi\Test::schema()->setAutoIncrement();
-      });
+      }, 'autoIncrement')
+      ->callback(function ($ctx) {
+        // FTS indices aren't create as part of regular schema -- because they are configurable (setting-dependent).
+        // Make sure that the actual SQL indices are sync'd up with the default settings.
+        \Civi\Schema\FullTextSearch::createOrDrop();
+      }, 'fts');
     $builder->install(['org.civicrm.search_kit', 'org.civicrm.afform', 'authx']);
     return $builder;
   }

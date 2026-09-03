@@ -95,9 +95,6 @@ class CRM_Core_BAO_Note extends CRM_Core_DAO_Note implements \Civi\Core\HookInte
     $note->copyValues($params);
     $note->save();
 
-    // check and attach and files as needed
-    CRM_Core_BAO_File::processAttachment($params, 'civicrm_note', $note->id);
-
     if ($note->entity_table == 'civicrm_contact') {
       CRM_Core_BAO_Log::register($note->entity_id,
         'civicrm_note',
@@ -478,6 +475,16 @@ WHERE participant.contact_id = %1 AND  note.entity_table = 'civicrm_participant'
     }
     CRM_Utils_Hook::selectWhereClause($this, $clauses, $userId, $conditions);
     return $clauses;
+  }
+
+  public static function getTopParent(int $id): CRM_Core_DAO_Note {
+    do {
+      $note = new CRM_Core_DAO_Note();
+      $note->id = $id;
+      $note->find(TRUE);
+      $id = $note->entity_id;
+    } while ($note->entity_table === 'civicrm_note');
+    return $note;
   }
 
 }

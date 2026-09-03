@@ -141,7 +141,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'componentClause' => 'civicrm_contribution.id IN ( ' . implode(',', $this->contributionIDs) . ')',
     ]);
     $this->assertContains('display', array_values($this->csv->getHeader()));
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertEquals('This is a test', $row['display']);
   }
 
@@ -186,10 +186,10 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
 
     $this->assertEquals(array_values(array_merge($this->getBasicHeaderDefinition(FALSE), self::getContributeHeaderDefinition())), $this->csv->getHeader());
     $this->assertCount(3, $this->csv);
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertEquals(95, $row['Net Amount']);
     $this->assertEquals('', $row['Soft Credit Amount']);
-    $row = $this->csv->fetchOne(1);
+    $row = $this->csv->nth(1);
     $this->assertEquals(95, $row['Net Amount']);
     $this->assertEquals(5, $row['Soft Credit Amount']);
     $this->assertEquals('Anderson, Anthony II', $row['Soft Credit For']);
@@ -217,7 +217,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
     ]);
     $membership = $this->callAPISuccessGetSingle('Membership', ['id' => $this->ids['membership']]);
 
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $expected = [
       'Contact ID' => $membership['contact_id'],
       'Contact Type' => 'Individual',
@@ -257,7 +257,6 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'Household Name' => '',
       'Organization Name' => '',
       'Sic Code' => '',
-      'Unique ID (OpenID)' => '',
       'Current Employer ID' => '',
       'Contact is in Trash' => '',
       'Created Date' => '2019-07-11 09:56:18',
@@ -342,7 +341,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'exportMode' => CRM_Export_Form_Select::ACTIVITY_EXPORT,
       'componentClause' => 'civicrm_activity.id IN ( ' . implode(',', $this->activityIDs) . ')',
     ]);
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertEquals($this->activityIDs[0], $row['Activity ID']);
   }
 
@@ -526,7 +525,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'selectAll' => TRUE,
     ]);
 
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertEquals([
       'Email' => 'home@example.com',
       'Home-Email' => 'home@example.com',
@@ -551,7 +550,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
     $selectedFields = [['contact_type' => 'Individual', 'name' => 'gender_id']];
     $this->callAPISuccess('Contact', 'create', ['id' => $this->contactIDs[0], 'gender_id' => 678]);
     $this->doExportTest(['fields' => $selectedFields, 'ids' => $this->contactIDs]);
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertEquals('Really long string', $row['Gender']);
   }
 
@@ -578,7 +577,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'fields' => $selectedFields,
       'componentClause' => 'contact_a.id IN (' . implode(',', $this->contactIDs) . ')',
     ]);
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertEquals('Big campaign and kinda long too', $row['Campaign Title']);
     $this->assertEquals($campaign['id'], $row['Campaign ID']);
   }
@@ -607,13 +606,13 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'fields' => $selectedFields,
     ]);
 
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertEquals('one', $row['First Name']);
     $this->assertEquals('Org 1', $row['Employee of-Organization Name']);
     $this->assertEquals('pretty legal', $row['Employee of-Legal Name']);
     $this->assertEquals('friend who took a law paper once', $row['Employee of-Contact Source']);
 
-    $row = $this->csv->fetchOne(1);
+    $row = $this->csv->nth(1);
     $this->assertEquals('Org 2', $row['Employee of-Organization Name']);
     $this->assertEquals('well dodgey', $row['Employee of-Legal Name']);
   }
@@ -648,7 +647,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'fields' => $selectedFields,
       'mergeSameHousehold' => TRUE,
     ]);
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertCount(1, $this->csv);
     $this->assertEquals('Portland', $row['City']);
     $this->assertEquals('ME', $row['State']);
@@ -684,7 +683,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'componentTable' => 'civicrm_contact',
       'componentClause' => 'contact_a.id IN (' . implode(',', $this->contactIDs) . ')',
     ]);
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertCount(1, $this->csv);
     $this->assertEquals($householdID, $row['Household ID']);
 
@@ -699,7 +698,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
   public function testExportRelationshipsMergeToHouseholdAllFields(): void {
     [$householdID] = $this->setUpHousehold();
     $this->doExportTest(['ids' => $this->contactIDs, 'mergeSameHousehold' => TRUE]);
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertCount(1, $this->csv);
     $this->assertEquals('Unit Test household', $row['Display Name']);
     $this->assertEquals('Portland', $row['City']);
@@ -725,9 +724,11 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'select_string' => ['text_length' => strlen($longString)],
       'checkbox' => ['text_length' => 10],
       'radio' => ['text_length' => strlen($longString)],
+      'float' => ['text_length' => 5],
     ]);
     $this->addOptionToCustomField('select_string', ['label' => $longString, 'name' => 'blah']);
     $this->addOptionToCustomField('radio', ['label' => $longString, 'name' => 'blah', 'value' => 6]);
+    $this->addOptionToCustomField('float', ['label' => $longString . 'very', 'name' => 'blah2', 'value' => 10]);
     $longUrl = 'https://stage.example.org/system/files/webform/way_too_long_url_that_still_fits_in_a_link_custom_field_but_would_fail_to_export_with_html.jpg';
 
     $this->callAPISuccess('Contact', 'create', [
@@ -739,6 +740,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       $this->getCustomFieldName('link') => $longUrl,
       $this->getCustomFieldName('checkbox') => ['L', 'P', 'M', 'V'],
       $this->getCustomFieldName('radio') => 6,
+      $this->getCustomFieldName('float') => 10,
     ]);
     $selectedFields = [
       ['name' => 'city', 'location_type_id' => CRM_Core_PseudoConstant::getKey('CRM_Core_BAO_Address', 'location_type_id', 'Billing')],
@@ -748,12 +750,13 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       ['name' => $this->getCustomFieldName('link')],
       ['name' => $this->getCustomFieldName('checkbox')],
       ['name' => $this->getCustomFieldName('radio')],
+      ['name' => $this->getCustomFieldName('float')],
     ];
     $this->doExportTest([
       'fields' => $selectedFields,
       'ids' => [$this->contactIDs[1]],
     ]);
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertEquals($longString, $row['Enter text here']);
     $this->assertEquals('Waipu', $row['Billing-City']);
     $this->assertEquals("Lao People's Democratic Republic", $row['Country']);
@@ -761,6 +764,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
     $this->assertEquals($longUrl, $row['test_link']);
     $this->assertEquals("Lilac, Purple, Mauve, Violet", $row['Pick Shade']);
     $this->assertEquals($longString, $row['Integer radio']);
+    $this->assertEquals($longString . 'very', $row['Number select']);
   }
 
   /**
@@ -1054,7 +1058,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'fields' => $selectedFields,
       'ids' => [$this->contactIDs[1]],
     ]);
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertEquals(CRM_Contact_BAO_Contact::getMasterDisplayName($this->masterAddressID), $row['Home-Master Address ID']);
   }
 
@@ -1119,7 +1123,6 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'Household Name' => '',
       'Organization Name' => '',
       'Sic Code' => '',
-      'Unique ID (OpenID)' => '',
       'Current Employer ID' => '',
       'Contact is in Trash' => '',
       'Created Date' => '2019-07-11 10:28:15',
@@ -1166,7 +1169,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'Note(s)' => '',
     ];
     // Include both possible options as we rely on implicit order here and MySQL 8 in testing is returning a different value for some fields.
-    $this->assertExpectedOutput($expected, $this->csv->fetchOne(), [
+    $this->assertExpectedOutput($expected, $this->csv->nth(0), [
       'Email' => ['home@example.com', 'work@example.com'],
       'Location Type' => ['Home', 'Work'],
     ]);
@@ -1201,7 +1204,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'Addressee' => 'random string Mr. Anthony Anderson II, Mr. Joe Miller II',
       'Email Greeting' => 'II Anderson and first is Anthony , II Miller Joe ',
       'Postal Greeting' => 'II Anderson and first is Anthony , II Miller Joe ',
-    ], $this->csv->fetchOne());
+    ], $this->csv->nth(0));
     // 3 contacts merged to 2.
     $this->assertCount(2, $this->csv);
   }
@@ -1272,8 +1275,8 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
     ]);
 
     $this->assertCount(1, $this->csv);
-    $this->csv->fetchOne();
-    $this->assertEquals('Household', $this->csv->fetchOne()['Contact Type']);
+    $this->csv->nth(0);
+    $this->assertEquals('Household', $this->csv->nth(0)['Contact Type']);
   }
 
   /**
@@ -1288,7 +1291,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
    * @throws \CRM_Core_Exception
    * @throws \League\Csv\UnableToProcessCsv
    */
-  public function testExportDeceasedDoNotMail($reason, $addressReason): void {
+  public function testExportDeceasedDoNotMail(array $reason, array $addressReason): void {
     $contactA = $this->callAPISuccess('contact', 'create', [
       'first_name' => 'John',
       'last_name' => 'Doe',
@@ -1348,7 +1351,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
         'mergeSameAddress' => TRUE,
       ],
     ]);
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
 
     $this->assertNotContains('Stage', $this->processor->getHeaderRows());
     $this->assertEquals('Dear John', $row['Email Greeting']);
@@ -1578,7 +1581,6 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'household_name' => 1,
       'organization_name' => 1,
       'sic_code' => 1,
-      'user_unique_id' => 1,
       'current_employer_id' => 1,
       'contact_is_deleted' => 1,
       'created_date' => 1,
@@ -2226,96 +2228,95 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
    */
   protected static function getBasicHeaderDefinition(bool $isContactExport): array {
     $headers = [
-      0 => 'Contact ID',
-      1 => 'Contact Type',
-      2 => 'External Identifier',
-      3 => 'Display Name',
-      4 => 'Organization Name',
-      5 => 'Contact Subtype',
-      6 => 'First Name',
-      7 => 'Middle Name',
-      8 => 'Last Name',
-      9 => 'Do Not Email',
-      10 => 'Do Not Phone',
-      11 => 'Do Not Mail',
-      12 => 'Do Not Sms',
-      13 => 'Do Not Trade',
-      14 => 'No Bulk Emails (User Opt Out)',
-      15 => 'Legal Identifier',
-      16 => 'Sort Name',
-      17 => 'Nickname',
-      18 => 'Legal Name',
-      19 => 'Image Url',
-      20 => 'Preferred Communication Method',
-      21 => 'Preferred Language',
-      22 => 'Contact Hash',
-      23 => 'Contact Source',
-      24 => 'Individual Prefix',
-      25 => 'Individual Suffix',
-      26 => 'Formal Title',
-      27 => 'Communication Style',
-      28 => 'Email Greeting ID',
-      29 => 'Postal Greeting ID',
-      30 => 'Addressee ID',
-      31 => 'Job Title',
-      32 => 'Gender',
-      33 => 'Birth Date',
-      34 => 'Deceased / Closed',
-      35 => 'Deceased / Closed Date',
-      36 => 'Household Name',
-      37 => 'Sic Code',
-      38 => 'Unique ID (OpenID)',
-      39 => 'Current Employer ID',
-      40 => 'Contact is in Trash',
-      41 => 'Created Date',
-      42 => 'Modified Date',
-      43 => 'Addressee',
-      44 => 'Email Greeting',
-      45 => 'Postal Greeting',
-      46 => 'Current Employer',
-      47 => 'Location Type',
-      48 => 'Address ID',
-      49 => 'Street Address',
-      50 => 'Street Number',
-      51 => 'Street Number Suffix',
-      52 => 'Street Name',
-      53 => 'Street Unit',
-      54 => 'Supplemental Address 1',
-      55 => 'Supplemental Address 2',
-      56 => 'Supplemental Address 3',
-      57 => 'City',
-      58 => 'Postal Code Suffix',
-      59 => 'Postal Code',
-      60 => 'Latitude',
-      61 => 'Longitude',
-      62 => 'Is Manually Geocoded',
-      63 => 'Address Name',
-      64 => 'Master Address ID',
-      65 => 'County',
-      66 => 'State',
-      67 => 'Country',
-      68 => 'Phone',
-      69 => 'Phone Extension',
-      70 => 'Phone Type ID',
-      71 => 'Phone Type',
-      72 => 'Email',
-      73 => 'On Hold',
-      74 => 'Use for Bulk Mail',
-      75 => 'Signature Text',
-      76 => 'Signature Html',
-      77 => 'IM Provider',
-      78 => 'IM Screen Name',
-      79 => 'OpenID',
-      80 => 'World Region',
-      81 => 'Website',
-      82 => 'Group(s)',
-      83 => 'Tag(s)',
-      84 => 'Note(s)',
+      'Contact ID',
+      'Contact Type',
+      'External Identifier',
+      'Display Name',
+      'Organization Name',
+      'Contact Subtype',
+      'First Name',
+      'Middle Name',
+      'Last Name',
+      'Do Not Email',
+      'Do Not Phone',
+      'Do Not Mail',
+      'Do Not Sms',
+      'Do Not Trade',
+      'No Bulk Emails (User Opt Out)',
+      'Legal Identifier',
+      'Sort Name',
+      'Nickname',
+      'Legal Name',
+      'Image Url',
+      'Preferred Communication Method',
+      'Preferred Language',
+      'Contact Hash',
+      'Contact Source',
+      'Individual Prefix',
+      'Individual Suffix',
+      'Formal Title',
+      'Communication Style',
+      'Email Greeting ID',
+      'Postal Greeting ID',
+      'Addressee ID',
+      'Job Title',
+      'Gender',
+      'Birth Date',
+      'Deceased / Closed',
+      'Deceased / Closed Date',
+      'Household Name',
+      'Sic Code',
+      'Current Employer ID',
+      'Contact is in Trash',
+      'Created Date',
+      'Modified Date',
+      'Addressee',
+      'Email Greeting',
+      'Postal Greeting',
+      'Current Employer',
+      'Location Type',
+      'Address ID',
+      'Street Address',
+      'Street Number',
+      'Street Number Suffix',
+      'Street Name',
+      'Street Unit',
+      'Supplemental Address 1',
+      'Supplemental Address 2',
+      'Supplemental Address 3',
+      'City',
+      'Postal Code Suffix',
+      'Postal Code',
+      'Latitude',
+      'Longitude',
+      'Is Manually Geocoded',
+      'Address Name',
+      'Master Address ID',
+      'County',
+      'State',
+      'Country',
+      'Phone',
+      'Phone Extension',
+      'Phone Type ID',
+      'Phone Type',
+      'Email',
+      'On Hold',
+      'Use for Bulk Mail',
+      'Signature Text',
+      'Signature Html',
+      'IM Provider',
+      'IM Screen Name',
+      'OpenID',
+      'World Region',
+      'Website',
+      'Group(s)',
+      'Tag(s)',
+      'Note(s)',
     ];
     if (!$isContactExport) {
-      unset($headers[82]);
-      unset($headers[83]);
-      unset($headers[84]);
+      unset($headers[array_search('Group(s)', $headers)]);
+      unset($headers[array_search('Tag(s)', $headers)]);
+      unset($headers[array_search('Note(s)', $headers)]);
     }
     return $headers;
   }
@@ -2554,7 +2555,6 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'household_name' => '`household_name` varchar(128)',
       'organization_name' => '`organization_name` varchar(128)',
       'sic_code' => '`sic_code` varchar(8)',
-      'user_unique_id' => '`user_unique_id` varchar(255)',
       'current_employer_id' => '`current_employer_id` varchar(64)',
       'contact_is_deleted' => '`contact_is_deleted` varchar(64)',
       'created_date' => '`created_date` varchar(32)',
@@ -2741,7 +2741,6 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'household_name' => '`household_name` varchar(128)',
       'organization_name' => '`organization_name` varchar(128)',
       'sic_code' => '`sic_code` varchar(8)',
-      'user_unique_id' => '`user_unique_id` varchar(255)',
       'current_employer_id' => '`current_employer_id` varchar(64)',
       'contact_is_deleted' => '`contact_is_deleted` varchar(64)',
       'created_date' => '`created_date` varchar(32)',
@@ -3059,7 +3058,7 @@ class CRM_Export_BAO_ExportTest extends CiviUnitTestCase {
       'fields' => $selectedFields,
       'exportMode' => CRM_Export_Form_Select::CONTACT_EXPORT,
     ]);
-    $row = $this->csv->fetchOne();
+    $row = $this->csv->nth(0);
     $this->assertEquals('Yellow', $row['Autocomplete Color']);
     $this->assertEquals('Yellow, Green', $row['Autocomplete Colors']);
   }

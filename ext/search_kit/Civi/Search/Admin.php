@@ -32,7 +32,38 @@ class Admin {
    * @return array
    * @throws \CRM_Core_Exception
    */
-  public static function getAdminSettings():array {
+  public static function getAdminSettings(): array {
+    // Check minimum permission needed to reach this
+    if (!\CRM_Core_Permission::check('manage own search_kit')) {
+      return [];
+    }
+    $cacheKey = \Civi::cache('metadata')->get('search_kit_admin_settings_key');
+    if (!$cacheKey) {
+      $cacheKey = uniqid();
+      \Civi::cache('metadata')->set('search_kit_admin_settings_key', $cacheKey);
+    }
+    $data = [
+      'defaultPagerSize' => (int) \Civi::settings()->get('default_pager_size'),
+      'modules' => \CRM_Core_BAO_Managed::getBaseModules(),
+      'cacheKey' => $cacheKey,
+      'tags' => Tag::get()
+        ->addSelect('id', 'label', 'color', 'is_selectable', 'description')
+        ->addWhere('used_for', 'CONTAINS', 'civicrm_saved_search')
+        ->execute(),
+    ];
+    return $data;
+  }
+
+  /**
+   * Returns system metadata needed for the `crmSearchAdmin` Angular module.
+   *
+   * Note: All dynamic data returned by this function MUST be derived from the `metadata` cache (or Civi::$statics).
+   * Flushing that one cache must be sufficient to make this function return fresh data.
+   *
+   * @return array
+   * @throws \CRM_Core_Exception
+   */
+  public static function getAdminMetadata(): array {
     // Check minimum permission needed to reach this
     if (!\CRM_Core_Permission::check('manage own search_kit')) {
       return [];
@@ -43,42 +74,24 @@ class Admin {
       'joins' => self::getJoins($schema),
       'pseudoFields' => AbstractRunAction::getPseudoFields(),
       'operators' => \CRM_Utils_Array::makeNonAssociative(self::getOperators()),
-      'permissions' => [],
+      'permissions' => \CRM_Core_Permission::getPermissionList(['civicrm', 'cms', 'userRole']),
       'functions' => self::getSqlFunctions(),
       'displayTypes' => Display::getDisplayTypes(['id', 'name', 'label', 'description', 'icon', 'grouping']),
       'styles' => \CRM_Utils_Array::makeNonAssociative(self::getStyles()),
-      'defaultPagerSize' => (int) \Civi::settings()->get('default_pager_size'),
       'defaultDisplay' => SearchDisplay::getDefault(FALSE)->setSavedSearch(['id' => NULL])->execute()->first(),
-      'modules' => \CRM_Core_BAO_Managed::getBaseModules(),
       'defaultDistanceUnit' => \CRM_Utils_Address::getDefaultDistanceUnit(),
       'optionAttributes' => \CRM_Core_SelectValues::optionAttributes(),
       'jobFrequency' => \Civi\Api4\Job::getFields()
         ->addWhere('name', '=', 'run_frequency')
         ->setLoadOptions(['id', 'label'])
         ->execute()->first()['options'],
-      'tags' => Tag::get()
-        ->addSelect('id', 'label', 'color', 'is_selectable', 'description')
-        ->addWhere('used_for', 'CONTAINS', 'civicrm_saved_search')
-        ->execute(),
-      'myName' => \CRM_Core_Session::singleton()->getLoggedInContactDisplayName(),
       'dateFormats' => self::getDateFormats(),
+      'setOperations' => \CRM_Core_SelectValues::setOperations(),
       'numberAttributes' => [
         \NumberFormatter::MAX_FRACTION_DIGITS => E::ts('Max Decimal Places'),
         \NumberFormatter::MIN_FRACTION_DIGITS => E::ts('Min Decimal Places'),
       ],
     ];
-    $perms = \Civi\Api4\Permission::get()
-      ->addWhere('group', 'IN', ['civicrm', 'cms'])
-      ->addWhere('is_active', '=', 1)
-      ->setOrderBy(['title' => 'ASC'])
-      ->execute();
-    foreach ($perms as $perm) {
-      $data['permissions'][] = [
-        'id' => $perm['name'],
-        'text' => $perm['title'],
-        'description' => $perm['description'] ?? NULL,
-      ];
-    }
     return $data;
   }
 
@@ -148,11 +161,12 @@ class Admin {
       ->addWhere('searchable', '!=', 'none')
       ->addOrderBy('title_plural')
       ->setChain([
-        'get' => ['$name', 'getActions', ['where' => [['name', '=', 'get']]], ['params']],
+        'get' => ['$name', 'getActions', ['where' => [['name', '=', 'get']], 'select' => ['params', 'ui_params']]],
       ])->execute();
     foreach ($entities as $entity) {
       // Skip if entity doesn't have a 'get' action or the user doesn't have permission to use get
-      if ($entity['get']) {
+      if (!empty($entity['get'][0])) {
+        $getAction = $entity['get'][0];
         // Add links with translatable titles
         $links = Display::getEntityLinks($entity['name']);
         if ($links) {
@@ -169,6 +183,7 @@ class Admin {
           \Civi::log()->warning('Entity could not be loaded', ['entity' => $entity['name']]);
           continue;
         }
+        $entity['fields'] = [];
         foreach ($getFields as $field) {
           $field['fieldName'] = $field['name'];
           // Hack for RelationshipCache to make Relationship fields editable
@@ -179,16 +194,16 @@ class Admin {
           }
           $entity['fields'][] = $field;
         }
-        if (empty($entity['fields'])) {
-          continue;
-        }
         $entity['default_columns'] = self::getDefaultColumns($entity, $getFields);
-        $params = $entity['get'][0];
+        $params = $getAction['params'];
         // Entity must support at least these params or it is too weird for search kit
         if (!array_diff(['select', 'where', 'orderBy', 'limit', 'offset'], array_keys($params))) {
           \CRM_Utils_Array::remove($params, 'checkPermissions', 'debug', 'chain', 'language', 'select', 'where', 'orderBy', 'limit', 'offset');
+          foreach ($getAction['ui_params'] as $uiParam) {
+            $entity['ui_params'][] = $uiParam + $params[$uiParam['name']];
+          }
           unset($entity['get']);
-          $schema[$entity['name']] = ['params' => array_keys($params)] + array_filter($entity);
+          $schema[$entity['name']] = ['params' => array_keys($params)] + $entity;
         }
       }
     }
@@ -266,6 +281,7 @@ class Admin {
               if ($newField) {
                 $newField['name'] = $field['name'] . '.' . $labelField;
                 $newField['label'] = $field['label'] . ' ' . $newField['label'];
+                $newField['implicit_join'] = $field['fk_entity'];
                 array_splice($entity['fields'], $index + 1, 0, [$newField]);
               }
             }
@@ -284,6 +300,19 @@ class Admin {
             }
           }
         }
+        // Contact ID of primary membership.
+        if ($entity['name'] === 'Membership') {
+          $ownerMembershipField = \CRM_Utils_Array::findAll($schema['Membership']['fields'], ['name' => 'owner_membership_id'])[0];
+          $newField = \CRM_Utils_Array::findAll($schema['Membership']['fields'], ['name' => 'contact_id'])[0];
+          $newField['name'] = 'owner_membership_id.contact_id';
+          $newField['label'] = ($ownerMembershipField['input_attrs']['label'] ?? $ownerMembershipField['label']) . ' ' . $newField['label'];
+          array_splice(
+            $entity['fields'],
+            array_search('owner_membership_id', array_column($entity['fields'], 'name')) + 1,
+            0,
+            [$newField]
+          );
+        }
       }
     }
     return array_values($schema);
@@ -298,7 +327,7 @@ class Admin {
   public static function getJoins(array $allowedEntities):array {
     $joins = [];
     foreach ($allowedEntities as $entity) {
-      $isVirtualEntity = (bool) array_intersect(['CustomValue', 'SavedSearch'], $entity['type']);
+      $isVirtualEntity = (bool) array_intersect(['CustomValue', 'SavedSearch', 'SqlView'], $entity['type']);
 
       // Normal DAO entities (excludes virtual entities)
       // FIXME: At this point DAO entities have enough metadata that using getReferenceColumns()
@@ -340,6 +369,16 @@ class Admin {
               // Add the straight 1-1 join (but only if it's not a reference to itself, those can be done with implicit joins)
               if (!$isSelf) {
                 $alias = $entity['name'] . '_' . $targetEntityName . '_' . $keyField['name'];
+
+                // For LineItem we have contribution_id and entity_id=contribution_id when entity_table=civicrm_contribution
+                // They are the same and it is confusing to have two joins in the SearchKit UI.
+                // Aliases: LineItem_Contribution_contribution_id and LineItem_Contribution_entity_id
+                if ($alias === 'LineItem_Contribution_entity_id') {
+                  // LineItem.entity_id === LineItem.contribution_id if LineItem.entity_table='civicrm_contribution'
+                  // Don't show the duplicate join - see https://github.com/civicrm/civicrm-core/pull/35495
+                  continue;
+                }
+
                 $joins[$entity['name']][] = [
                   'label' => $entity['title'] . ' ' . ($dynamicCol ? $targetEntity['title'] : $keyField['label']),
                   'description' => '',
@@ -374,7 +413,8 @@ class Admin {
             $keyField = $fields[$reference->getReferenceKey()] ?? NULL;
             foreach ($reference->getTargetEntities() as $dynamicValue => $targetEntityName) {
               $targetEntity = $allowedEntities[$targetEntityName] ?? NULL;
-              $baseEntity = $allowedEntities[$fields[$baseKey]['fk_entity']] ?? NULL;
+              $fkEntity = $fields[$baseKey]['fk_entity'] ?? '';
+              $baseEntity = $allowedEntities[$fkEntity] ?? NULL;
               if (!$targetEntity || !$baseEntity) {
                 continue;
               }
@@ -421,7 +461,7 @@ class Admin {
         // FIXME: See comment above: this loop should be able to handle every entity.
         // Above block could be removed and the first part of this conditional
         // `($field['type'] === 'Custom' || $isVirtualEntity)` can be removed.
-        if (($field['type'] === 'Custom' || $isVirtualEntity) && $field['fk_entity'] && $field['input_type'] === 'EntityRef') {
+        if (($field['type'] === 'Custom' || $isVirtualEntity) && $field['fk_entity'] && in_array($field['input_type'], ['EntityRef', 'File'], TRUE)) {
           $entityRefJoins = self::getEntityRefJoins($entity, $field);
           foreach ($entityRefJoins as $joinEntity => $joinInfo) {
             $joins[$joinEntity][] = $joinInfo;

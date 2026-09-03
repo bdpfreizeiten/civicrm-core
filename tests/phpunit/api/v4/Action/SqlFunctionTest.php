@@ -23,6 +23,7 @@ use api\v4\Api4TestBase;
 use Civi\Api4\Activity;
 use Civi\Api4\Contact;
 use Civi\Api4\Contribution;
+use Civi\Api4\CustomGroup;
 use Civi\Api4\Utils\CoreUtil;
 use Civi\Test\TransactionalInterface;
 
@@ -148,6 +149,45 @@ class SqlFunctionTest extends Api4TestBase implements TransactionalInterface {
     $this->assertFalse($agg['is_donation_4']);
   }
 
+  /**
+   * Test that GROUP_FIRST on a Date field can be filtered correctly.
+   *
+   * MySQL's GROUP_CONCAT returns Date values as 'Y-m-d' strings. Without a fix,
+   * the filter generates `col` > '20230301' (Ymd format), but when compared to
+   * '2023-06-01' (Y-m-d format from GROUP_CONCAT), the '-' (ASCII 45) < '0' (ASCII 48)
+   * at position 5 means all same-year dates sort incorrectly.
+   *
+   * @see https://lab.civicrm.org/dev/core/-/work_items/6612
+   */
+  public function testGroupFirstDateFieldFilter(): void {
+    $lastName = uniqid(__FUNCTION__);
+    $contacts = $this->saveTestRecords('Individual', [
+      'records' => [
+        // All birth dates in the same year to expose the comparison bug.
+        // Alpha: Feb — excluded by filter > 2023-03-01
+        // Beta:  Jun — included
+        // Gamma: Sep — included
+        ['last_name' => $lastName, 'birth_date' => '2023-02-01'],
+        ['last_name' => $lastName, 'birth_date' => '2023-06-01'],
+        ['last_name' => $lastName, 'birth_date' => '2023-09-01'],
+      ],
+    ]);
+
+    $result = Contact::get(FALSE)
+      ->addSelect('id')
+      ->addSelect('GROUP_FIRST(birth_date ORDER BY id ASC) AS GROUP_FIRST_birth_date')
+      ->addGroupBy('id')
+      ->addWhere('last_name', '=', $lastName)
+      ->addHaving('GROUP_FIRST_birth_date', '>', '2023-03-01')
+      ->execute();
+
+    $this->assertCount(2, $result, 'Should return Beta and Gamma (birth dates after 2023-03-01)');
+    $returnedIds = array_column((array) $result, 'id');
+    $this->assertContains($contacts[1]['id'], $returnedIds, 'Beta (June) should be included');
+    $this->assertContains($contacts[2]['id'], $returnedIds, 'Gamma (September) should be included');
+    $this->assertNotContains($contacts[0]['id'], $returnedIds, 'Alpha (February) should be excluded');
+  }
+
   public function testGroupConcatUnique(): void {
     $cid1 = $this->createTestRecord('Contact')['id'];
     $cid2 = $this->createTestRecord('Contact')['id'];
@@ -230,6 +270,71 @@ class SqlFunctionTest extends Api4TestBase implements TransactionalInterface {
     ], ['DATE:receive_date' => 'SUM:total_amount']);
     $this->assertCount(1, $result);
     $this->assertEquals(['2020-04-04' => 400], $result);
+  }
+
+  /**
+   * HAVING clauses that compare a Timestamp/Date-valued aggregate function (e.g. GROUP_FIRST,
+   * which is implemented as SUBSTRING_INDEX(GROUP_CONCAT(...))) against a date must not degrade
+   * into a lexicographic string comparison. MySQL's GROUP_CONCAT always returns a string, so
+   * without a cast back to a real date type, `'2020-02-02 00:00:00' > '20200101000000'`
+   * evaluates FALSE (the `-` character sorts before any digit), incorrectly excluding rows whose
+   * date actually is later than the filter.
+   */
+  public function testGroupHavingWithDateAggregateFunction(): void {
+    $cid = Contact::create(FALSE)->addValue('first_name', 'donor')->execute()->first()['id'];
+    Contribution::save(FALSE)
+      ->setDefaults(['contact_id' => $cid, 'financial_type_id' => 1])
+      ->setRecords([
+        // Earliest receive_date is in the same year as, but chronologically after, the HAVING
+        // filter below. This is exactly the case a naive string comparison gets wrong.
+        ['total_amount' => 100, 'receive_date' => '2020-02-02'],
+        ['total_amount' => 200, 'receive_date' => '2020-09-23'],
+        ['total_amount' => 300, 'receive_date' => '2025-02-08'],
+      ])
+      ->execute();
+
+    // Timestamp field (Contribution.receive_date) via GROUP_FIRST.
+    $result = Contribution::get(FALSE)
+      ->addSelect('contact_id', 'GROUP_FIRST(receive_date ORDER BY receive_date ASC) AS first_date')
+      ->addWhere('contact_id', '=', $cid)
+      ->addGroupBy('contact_id')
+      ->addHaving('first_date', '>', '2020-01-01')
+      ->execute();
+    $this->assertCount(1, $result);
+    $this->assertEquals('2020-02-02 00:00:00', $result[0]['first_date']);
+
+    // Same query but the HAVING filter should correctly exclude when the earliest date is not
+    // actually after the filter.
+    $result = Contribution::get(FALSE)
+      ->addSelect('contact_id', 'GROUP_FIRST(receive_date ORDER BY receive_date ASC) AS first_date')
+      ->addWhere('contact_id', '=', $cid)
+      ->addGroupBy('contact_id')
+      ->addHaving('first_date', '>', '2020-02-02')
+      ->execute();
+    $this->assertCount(0, $result);
+
+    // Date field (Contact.birth_date, grouped across 2 contacts sharing a nick_name) via
+    // GROUP_FIRST, to cover the 'Date' (not just 'Timestamp') cast branch.
+    $group = uniqid('havingDateGroup');
+    Contact::create(FALSE)
+      ->addValue('first_name', 'donorA')
+      ->addValue('nick_name', $group)
+      ->addValue('birth_date', '2020-02-02')
+      ->execute();
+    Contact::create(FALSE)
+      ->addValue('first_name', 'donorB')
+      ->addValue('nick_name', $group)
+      ->addValue('birth_date', '2020-05-05')
+      ->execute();
+
+    $result = Contact::get(FALSE)
+      ->addSelect('nick_name', 'GROUP_FIRST(birth_date ORDER BY birth_date ASC) AS first_birth')
+      ->addWhere('nick_name', '=', $group)
+      ->addGroupBy('nick_name')
+      ->addHaving('first_birth', '>', '2020-01-01')
+      ->execute();
+    $this->assertCount(1, $result);
+    $this->assertEquals('2020-02-02', $result[0]['first_birth']);
   }
 
   public function testComparisonFunctions(): void {
@@ -570,6 +675,106 @@ class SqlFunctionTest extends Api4TestBase implements TransactionalInterface {
       ->addGroupBy('EXTRACT(YEAR FROM birth_date)')
       ->execute();
     $this->assertCount(2, $result);
+  }
+
+  public function testJsonExtract(): void {
+    CustomGroup::delete(FALSE)->addWhere('id', '>', 0)->execute();
+    \Civi\Api4\CustomGroup::create(FALSE)
+      ->addValue('name', 'json_test')
+      ->addValue('title', 'Json test')
+      ->addChain('json_object', \Civi\Api4\CustomField::create(FALSE)
+        ->addValue('html_type', 'Text')
+        ->addValue('name', 'json_object')
+        ->addValue('label', 'Json test object field')
+        ->addValue('custom_group_id', '$id')
+      )
+      ->addChain('json_array', \Civi\Api4\CustomField::create(FALSE)
+        ->addValue('html_type', 'Text')
+        ->addValue('name', 'json_array')
+        ->addValue('label', 'Json test array field')
+        ->addValue('custom_group_id', '$id')
+      )
+      ->execute();
+
+    $lastName = uniqid(__FUNCTION__);
+    $sampleData = [
+      [
+        'first_name' => 'abc',
+        'last_name' => $lastName,
+        'json_test.json_object' => json_encode(['a' => 1, 'b' => 'one', 'Contact Country' => 'United Kingdon']),
+        'json_test.json_array' => json_encode([1, 2, 3]),
+      ],
+      [
+        'first_name' => 'def',
+        'last_name' => $lastName,
+        'json_test.json_object' => json_encode(['a' => 2, 'b' => 'two', 'Contact Country' => 'United States']),
+        'json_test.json_array' => json_encode([4, 15, 9]),
+      ],
+    ];
+    Contact::save(FALSE)
+      ->setRecords($sampleData)
+      ->execute();
+
+    // Test JSON_EXTRACT in select
+    $result = Contact::get(FALSE)
+      ->addWhere('last_name', '=', $lastName)
+      ->addSelect('JSON_EXTRACT(json_test.json_object, "$.a") AS a')
+      ->addSelect('JSON_EXTRACT(json_test.json_object, "$.b") AS b')
+      ->addSelect('JSON_EXTRACT(json_test.json_object, "Contact Country") AS country')
+      ->addSelect('JSON_EXTRACT(json_test.json_array, "$[0]") AS first_element')
+      ->addSelect('JSON_EXTRACT(json_test.json_array, "$[1]") AS second_element')
+      ->addSelect('JSON_EXTRACT(json_test.json_array, "$[2]") AS third_element')
+      ->addOrderBy('id')
+      ->execute();
+
+    $this->assertCount(2, $result);
+    $this->assertEquals(1, $result[0]['a']);
+    $this->assertEquals('one', $result[0]['b']);
+    $this->assertEquals('United Kingdon', $result[0]['country']);
+    $this->assertEquals(1, $result[0]['first_element']);
+    $this->assertEquals(2, $result[0]['second_element']);
+    $this->assertEquals(3, $result[0]['third_element']);
+
+    $this->assertEquals(2, $result[1]['a']);
+    $this->assertEquals('two', $result[1]['b']);
+    $this->assertEquals('United States', $result[1]['country']);
+    $this->assertEquals(4, $result[1]['first_element']);
+    $this->assertEquals(15, $result[1]['second_element']);
+    $this->assertEquals(9, $result[1]['third_element']);
+  }
+
+  /**
+   * Ensures field data is formatted correctly within the IF() function.
+   */
+  public function testSqlFunctionIfDataType(): void {
+    $cid = Contact::create(FALSE)
+      ->addValue('first_name', 'hello')
+      ->addValue('birth_date', '2020-05-05')
+      ->addValue('is_opt_out', TRUE)
+      ->addValue('preferred_communication_method:name', ['Phone', 'Email'])
+      ->execute()->first()['id'];
+
+    $result = Contact::get(FALSE)
+      ->addWhere('id', '=', $cid)
+      ->addSelect('IF(is_deleted, "Yes", "No") AS string_lit')
+      ->addSelect('IF(is_deleted, "Yes", first_name) AS string_field')
+      ->addSelect('IF(is_deleted, 10, 20) AS int_val')
+      ->addSelect('IF(is_deleted, 0, id) AS int_field')
+      ->addSelect('IF(is_deleted, 1.5, 2.5) AS float_val')
+      ->addSelect('IF(is_deleted, created_date, birth_date) AS date_val')
+      ->addSelect('IF(is_deleted, is_deleted, is_opt_out) AS bool_val')
+      ->addSelect('IF(is_deleted, NULL, preferred_communication_method:name) AS array_val')
+      ->execute()->first();
+
+    $this->assertSame('No', $result['string_lit']);
+    $this->assertSame('hello', $result['string_field']);
+    $this->assertSame(20, $result['int_val']);
+    $this->assertSame((int) $cid, $result['int_field']);
+    $this->assertSame(2.5, $result['float_val']);
+    $this->assertSame('2020-05-05 00:00:00', $result['date_val']);
+
+    $this->assertSame(TRUE, $result['bool_val']);
+    $this->assertSame(['Phone', 'Email'], $result['array_val']);
   }
 
 }

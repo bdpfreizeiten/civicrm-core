@@ -8,8 +8,8 @@ return [
   ],
   'css' => ['ang/afGuiEditor.css'],
   'partials' => ['ang/afGuiEditor'],
-  'requires' => ['crmUi', 'crmUtil', 'crmDialog', 'api4', 'crmMonaco', 'ui.sortable'],
-  'settingsFactory' => ['Civi\AfformAdmin\AfformAdminMeta', 'getMetadata'],
+  'requires' => ['crmUi', 'crmUtil', 'crmDialog', 'api4', 'crmMonaco', 'ui.sortable', 'crmEntityTags'],
+  'settingsFactory' => ['Civi\AfformAdmin\AfformAdminMeta', 'getModuleSettings'],
   'basePages' => [],
   'exports' => [
     'af-gui-editor' => 'E',

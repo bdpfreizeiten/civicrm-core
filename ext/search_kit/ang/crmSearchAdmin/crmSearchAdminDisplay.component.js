@@ -15,7 +15,6 @@
       CRM.crmSearchAdmin.displayTypes.forEach(function(type) {
         html +=
           '<div ng-switch-when="' + type.id + '">\n' +
-          '  <div class="help-block"><i class="crm-i ' + type.icon + '" role="img" aria-hidden="true"></i> ' + _.escape(type.description) + '</div>' +
           '  <search-admin-display-' + type.id + ' api-entity="$ctrl.savedSearch.api_entity" api-params="$ctrl.savedSearch.api_params" display="$ctrl.display"></search-admin-display-' + type.id + '>\n' +
           '  <hr>\n' +
           '  <button type="button" class="btn btn-{{ !$ctrl.stale ? \'success\' : $ctrl.preview ? \'warning\' : \'primary\' }}" ng-click="$ctrl.previewDisplay()" ng-disabled="!$ctrl.stale">\n' +
@@ -40,6 +39,10 @@
       this.aclBypassHelp = ts('Only users with "all CiviCRM permissions and ACLs" can disable permission checks.');
 
       this.preview = this.stale = false;
+
+      this.$onInit = function() {
+        this.displayType = CRM.crmSearchAdmin.displayTypes.find(type => type.id === this.display.type);
+      };
 
       // Extra (non-field) colum types
       this.colTypes = {
@@ -67,6 +70,19 @@
             size: 'btn-xs',
             icon: 'fa-bars',
             links: []
+          }
+        },
+        subsearch: {
+          label: ts('Embedded Subsearch'),
+          icon: 'fa-window-restore',
+          defaults: {
+            label: '',
+            rewrite: '',
+            alignment: '',
+            subsearch: {
+              filters: [],
+              subsearch_mode: 'dropdown'
+            }
           }
         },
         include: {
@@ -101,7 +117,7 @@
       this.addCol = function(type) {
         const col = _.cloneDeep(this.colTypes[type].defaults);
         col.type = type;
-        if (this.display.type === 'table') {
+        if (this.display.type === 'table' && !('alignment' in col)) {
           col.alignment = 'text-right';
         }
         ctrl.display.settings.columns.push(col);
@@ -125,19 +141,27 @@
         if (index > -1) {
           ctrl.removeCol(index);
         } else {
-          ctrl.display.settings.columns.push(searchMeta.fieldToColumn(key, initDefaults));
+          ctrl.display.settings.columns.push(searchMeta.fieldToColumn(key, initDefaults, ctrl.savedSearch));
         }
+      };
+
+      this.toggleNoResultsText = () => {
+        ctrl.display.settings.noResultsText = ctrl.display.settings.noResultsText === false ? '' : false;
       };
 
       this.getDataType = function(key) {
         const expr = ctrl.getExprFromSelect(key);
-        const info = searchMeta.parseExpr(expr);
-        const field = (_.findWhere(info.args, {type: 'field'}) || {}).field || {};
+        const info = searchMeta.parseExpr(expr, ctrl.savedSearch);
+        const field = (info.args.find((arg) => arg.type === 'field') || {}).field || {};
         return (info.fn && info.fn.data_type) || field.data_type;
       };
 
       this.isDate = function(key) {
         return ['Date', 'Timestamp'].includes(this.getDataType(key));
+      };
+
+      this.isMoney = function(key) {
+        return this.getDataType(key) === 'Money';
       };
 
       this.getExprFromSelect = function(key) {
@@ -174,7 +198,6 @@
           col.rewrite = '';
         } else {
           col.rewrite = '[' + col.key + ']';
-          delete col.editable;
         }
       };
 
@@ -222,7 +245,7 @@
 
       this.canBeImage = function(col) {
         const expr = ctrl.getExprFromSelect(col.key),
-          info = searchMeta.parseExpr(expr);
+          info = searchMeta.parseExpr(expr, ctrl.savedSearch);
         return info.args[0] && info.args[0].field && info.args[0].field.input_type === 'File';
       };
 
@@ -234,10 +257,11 @@
         }
       };
 
-      this.canBeEditable = function(col) {
+      this.canBeEditable = (col) => {
         const expr = ctrl.getExprFromSelect(col.key),
-          info = searchMeta.parseExpr(expr);
-        return !col.rewrite && !col.link && !info.fn && info.args[0] && info.args[0].field && !info.args[0].field.readonly;
+          info = searchMeta.parseExpr(expr, ctrl.savedSearch);
+        return !col.link && !info.fn && info.args[0] && info.args[0].field &&
+          (info.args[0].field.implicit_join || !info.args[0].field.readonly);
       };
 
       // Checks if a column contains a sortable value
@@ -248,8 +272,8 @@
           return false;
         }
         const expr = ctrl.getExprFromSelect(col.key),
-          info = searchMeta.parseExpr(expr),
-          arg = (info && info.args && _.findWhere(info.args, {type: 'field'})) || {};
+          info = searchMeta.parseExpr(expr, ctrl.savedSearch),
+          arg = (info && info.args && info.args.find((arg) => arg.type === 'field')) || {};
         return arg.field && arg.field.type !== 'Pseudo';
       };
 
@@ -257,7 +281,7 @@
       // which gets special treatment in APIv4 to convert it to an array.
       function canUseLinks(colKey) {
         const expr = ctrl.getExprFromSelect(colKey),
-          info = searchMeta.parseExpr(expr);
+          info = searchMeta.parseExpr(expr, ctrl.savedSearch);
         return !info.fn || info.fn.category !== 'aggregate' || info.fn.name === 'GROUP_CONCAT';
       }
 
@@ -275,7 +299,7 @@
 
       this.onChangeLink = function(column, afterLink) {
         column.link = column.link || {};
-        const beforeLink = column.link.action && _.findWhere(ctrl.getLinks(column.key), {action: column.link.action});
+        const beforeLink = column.link.action && ctrl.getLinks(column.key).find((link) => link.action === column.link.action);
         if (!afterLink.action && !afterLink.path && !afterLink.task) {
           if (beforeLink && beforeLink.text === column.title) {
             delete column.title;
@@ -325,7 +349,7 @@
           return ctrl.links['0'];
         }
         const expr = ctrl.getExprFromSelect(columnKey),
-          info = searchMeta.parseExpr(expr),
+          info = searchMeta.parseExpr(expr, ctrl.savedSearch),
           joinEntity = searchMeta.getJoinEntity(info);
         if (!ctrl.links[joinEntity]) {
           ctrl.links[joinEntity] = _.filter(ctrl.links['*'], {join: joinEntity});
@@ -340,18 +364,24 @@
       };
 
       // Helper function to sort active from hidden columns and initialize each column with defaults
-      this.initColumns = function(defaults) {
+      this.initColumns = (defaults) => {
         initDefaults = defaults;
-        if (!ctrl.display.settings.columns) {
-          ctrl.display.settings.columns = _.transform(ctrl.savedSearch.api_params.select, function(columns, fieldExpr) {
-            columns.push(searchMeta.fieldToColumn(fieldExpr, defaults));
+        if (!this.display.settings.columns) {
+          this.display.settings.columns = _.transform(this.savedSearch.api_params.select, function(columns, fieldExpr) {
+            columns.push(searchMeta.fieldToColumn(fieldExpr, defaults, ctrl.savedSearch));
           });
         } else {
-          let activeColumns = ctrl.display.settings.columns.map(col => col.key);
+          let activeColumns = this.display.settings.columns.map(col => col.key);
           // Delete any column that is no longer in the search
           activeColumns.reverse().forEach((key, index) => {
-            if (key && !ctrl.getExprFromSelect(key)) {
-              ctrl.removeCol(activeColumns.length - 1 - index);
+            if (key && !this.getExprFromSelect(key)) {
+              this.removeCol(activeColumns.length - 1 - index);
+            }
+          });
+          // Fill in any missing default values from columns
+          this.display.settings.columns.forEach((col, index) => {
+            if (col.type && this.colTypes[col.type]?.defaults) {
+              this.display.settings.columns[index] = _.merge({}, this.colTypes[col.type].defaults, col);
             }
           });
         }
@@ -381,7 +411,7 @@
 
       this.fieldsForSort = function() {
         function disabledIf(key) {
-          return ctrl.display.settings.sort.findIndex(sort => sort[0] === key) >= 0;
+          return ctrl.display.settings.sort?.findIndex(sort => sort[0] === key) >= 0;
         }
         return {
           results: [
@@ -393,9 +423,9 @@
             },
             {
               text: ts('Columns'),
-              children: ctrl.crmSearchAdmin.getSelectFields(disabledIf)
+              children: ctrl.crmSearchAdmin.getSelectFields(ctrl.savedSearch, disabledIf)
             }
-          ].concat(ctrl.crmSearchAdmin.getAllFields('', ['Field', 'Custom', 'Extra'], disabledIf))
+          ].concat(ctrl.crmSearchAdmin.getAllFields(ctrl.savedSearch, '', ['Field', 'Custom', 'Extra'], disabledIf))
         };
       };
 
@@ -404,7 +434,7 @@
           return ctrl.display.settings.searchFields.findIndex(field => field === key) >= 0;
         }
         return {
-          results: ctrl.crmSearchAdmin.getAllFields('', ['Field', 'Custom', 'Extra'], disabledIf),
+          results: ctrl.crmSearchAdmin.getAllFields(ctrl.savedSearch, '', ['Field', 'Custom', 'Extra'], disabledIf),
         };
       };
 

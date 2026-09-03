@@ -121,7 +121,7 @@ trait DAOActionTrait {
 
     foreach ($fields as $name => $field) {
       // If a default value in the api field is different than in core, the api should override it.
-      if (!isset($params[$name]) && !empty($field['default_value']) && $field['default_value'] != \CRM_Utils_Array::pathGet($coreFields, [$name, 'default'])) {
+      if (!empty($field['default_value']) && !FormattingUtil::hasField($name, $params) && $field['default_value'] != \CRM_Utils_Array::pathGet($coreFields, [$name, 'default'])) {
         $params[$name] = $field['default_value'];
       }
     }
@@ -194,7 +194,8 @@ trait DAOActionTrait {
         $result[] = $this->baoToArray($dao, $items[$index]);
       }
       \CRM_Utils_API_HTMLInputCoder::singleton()->decodeRows($result);
-      FormattingUtil::formatOutputValues($result, $this->entityFields());
+      $coreFields = array_filter($this->entityFields(), fn($field) => $field['type'] === 'Field');
+      FormattingUtil::formatOutputValues($result, $coreFields);
     }
     else {
       $result = $this->reloadResults($daos, $this->reload);
@@ -232,9 +233,9 @@ trait DAOActionTrait {
   /**
    * @inheritDoc
    */
-  protected function formatWriteValues(&$record) {
+  protected function formatWriteValues(&$record, $entityName = NULL, $actionName = NULL) {
     $this->resolveFKValues($record);
-    parent::formatWriteValues($record);
+    parent::formatWriteValues($record, $entityName, $actionName);
   }
 
   /**
@@ -253,16 +254,28 @@ trait DAOActionTrait {
       }
       [$fieldName, $fkField] = explode('.', $key);
       $field = $this->entityFields()[$fieldName] ?? NULL;
-      if (!$field || $field['type'] !== 'Field' || empty($field['fk_entity'])) {
+      if (!$field || $field['type'] !== 'Field') {
         continue;
       }
-      $fkDao = CoreUtil::getBAOFromApiName($field['fk_entity']);
-      if (!$fkDao) {
-        throw new \CRM_Core_Exception('Failed to load ' . $field['fk_entity']);
+      $fkEntityName = $field['fk_entity'] ?? NULL;
+      $fkColumnName = $field['fk_column'] ?? 'id';
+      // Dynamic FK (e.g. `entity_id` paired with `entity_table`): the target entity
+      // isn't fixed, so resolve it from the sibling discriminator column's value,
+      // which must already be present (as a plain value) in this same record.
+      if (!$fkEntityName && !empty($field['dfk_entities'])) {
+        $controlField = $field['input_attrs']['control_field'] ?? NULL;
+        if (empty($record[$controlField])) {
+          continue;
+        }
+        $fkEntityName = CoreUtil::getApiNameFromTableName($record[$controlField]);
       }
+      if (!$fkEntityName) {
+        continue;
+      }
+      $fkEntity = \Civi::entity($fkEntityName);
       // Constrain search to the domain of the current entity
       $domainConstraint = NULL;
-      if (isset($fkDao::getSupportedFields()['domain_id'])) {
+      if ($fkEntity->getField('domain_id')) {
         if (!empty($record['domain_id'])) {
           $domainConstraint = $record['domain_id'] === 'current_domain' ? \CRM_Core_Config::domainID() : $record['domain_id'];
         }
@@ -270,16 +283,28 @@ trait DAOActionTrait {
           $domainConstraint = \CRM_Core_DAO::getFieldValue($this->getBaoName(), $record['id'], 'domain_id');
         }
       }
-      if ($domainConstraint) {
-        $fkSearch = new $fkDao();
-        $fkSearch->domain_id = $domainConstraint;
-        $fkSearch->$fkField = $value;
-        $fkSearch->find(TRUE);
-        $record[$fieldName] = $fkSearch->id;
+      $resolvedId = NULL;
+      if (CoreUtil::entityExists($fkEntityName)) {
+        $conditions = [[$fkField, '=', $value]];
+        if ($domainConstraint) {
+          $conditions[] = ['domain_id', '=', $domainConstraint];
+        }
+        $fkResult = civicrm_api4($fkEntityName, 'get', [
+          'select' => [$fkColumnName],
+          'where' => $conditions,
+          'checkPermissions' => $this->getCheckPermissions(),
+        ]);
+        $resolvedId = $fkResult->single()[$fkColumnName];
       }
-      // Simple lookup without all the fuss about domains
+      // E.g. component_id (Component does not have an Api4 entity)
+      elseif ($fkDao = CoreUtil::getBAOFromApiName($fkEntityName)) {
+        $resolvedId = \CRM_Core_DAO::getFieldValue($fkDao, $value, $fkColumnName, $fkField);
+      }
+      if ($resolvedId !== NULL) {
+        $record[$fieldName] = $resolvedId;
+      }
       else {
-        $record[$fieldName] = \CRM_Core_DAO::getFieldValue($fkDao, $value, 'id', $fkField);
+        throw new \CRM_Core_Exception('Failed to load ' . $fkEntityName);
       }
       unset($record[$key]);
     }
@@ -300,7 +325,7 @@ trait DAOActionTrait {
       // look for a field whose value is unspecified and whose default is non-null
       foreach ($customGroup['fields'] as $field) {
         $fieldName = "{$customGroup['name']}.{$field['name']}";
-        if (isset($field['default_value']) && !array_key_exists($fieldName, $record)) {
+        if (isset($field['default_value']) && !FormattingUtil::hasField($fieldName, $record)) {
           $record[$fieldName] = $field['default_value'];
           // Setting the non-null value for one field in the group will ensure that all get written
           break;
@@ -337,11 +362,6 @@ trait DAOActionTrait {
         $value = '';
       }
 
-      // Uglify checkbox values for the sake of CustomField::formatCustomField()
-      if ($field['html_type'] === 'CheckBox' && is_array($value)) {
-        $value = array_fill_keys($value, TRUE);
-      }
-
       // Match contact id to strings like "user_contact_id"
       // FIXME handle arrays for multi-value contact reference fields, etc.
       if (in_array($field['data_type'], ['ContactReference', 'EntityReference']) && is_string($value)) {
@@ -352,13 +372,14 @@ trait DAOActionTrait {
         $field['id'],
         $customParams,
         $value,
-        $field['extends'],
+        $field['custom_group']['extends'],
         // todo check when this is needed
         NULL,
         $entityId,
         FALSE,
         $this->getCheckPermissions(),
-        TRUE
+        TRUE,
+        FALSE
       );
     }
 
@@ -373,27 +394,14 @@ trait DAOActionTrait {
    * @return array{id: int, name: string, entity: string, suffix: string, html_type: string, data_type: string, extends: string, table_name: string}|NULL
    */
   protected function getCustomFieldInfo(string $fieldExpr): ?array {
-    if (!str_contains($fieldExpr, '.')) {
-      return NULL;
+    [$fieldName, $suffix] = array_pad(explode(':', $fieldExpr), 2, NULL);
+    $field = \CRM_Core_BAO_CustomField::getFieldByName($fieldName);
+    if ($field) {
+      $field['name'] = $fieldName;
+      $field['entity'] = \CRM_Core_BAO_CustomGroup::getEntityFromExtends($field['custom_group']['extends']);
+      $field['suffix'] = $suffix;
     }
-    [$groupName, $fieldName] = explode('.', $fieldExpr);
-    [$fieldName, $suffix] = array_pad(explode(':', $fieldName), 2, NULL);
-    foreach (\CRM_Core_BAO_CustomGroup::getAll() as $customGroup) {
-      if ($customGroup['name'] === $groupName) {
-        foreach ($customGroup['fields'] as $field) {
-          if ($field['name'] === $fieldName) {
-            $field['custom_field_id'] = $field['id'];
-            $field['table_name'] = $customGroup['table_name'];
-            $field['extends'] = $customGroup['extends'];
-            $field['name'] = "$groupName.$fieldName";
-            $field['entity'] = \CRM_Core_BAO_CustomGroup::getEntityFromExtends($customGroup['extends']);
-            $field['suffix'] = $suffix;
-            return $field;
-          }
-        }
-      }
-    }
-    return NULL;
+    return $field;
   }
 
   /**

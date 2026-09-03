@@ -17,9 +17,6 @@ use Civi\Token\TokenProcessor;
  * @copyright CiviCRM LLC https://civicrm.org/licensing
  */
 
-
-require_once 'Mail/mime.php';
-
 /**
  * Class CRM_Mailing_Event_BAO_Subscribe
  */
@@ -117,7 +114,6 @@ SELECT     civicrm_email.id as email_id
 
     if (!$dao->fetch()) {
       throw new CRM_Core_Exception('Please file an issue with the backtrace');
-      return $success;
     }
 
     $se = new CRM_Mailing_Event_BAO_MailingEventSubscribe();

@@ -47,4 +47,94 @@ class AfformMetadataTest extends \PHPUnit\Framework\TestCase implements Headless
 
   }
 
+  public function testSuffixedFieldMeta():void {
+    $suffixedFieldMeta = FormDataModel::getField('Individual', 'communication_style_id:name', 'create');
+
+    $this->assertEquals($suffixedFieldMeta['data_type'], 'String');
+
+    // check there are options
+    $options = $suffixedFieldMeta['options'];
+    $this->assertTrue(count($options) >= 2);
+
+    // check the names have been returned as option IDs
+    $optionIds = \array_map(fn ($option) => $option['id'], $options);
+    $this->assertTrue(\in_array('formal', $optionIds));
+  }
+
+  public function testEntityRefSelectOptions(): void {
+    $doc = \phpQuery::newDocumentHTML('<af-field name="employer_id"></af-field>');
+    $afField = $doc->find('af-field')->get(0);
+    $afField->setAttribute('defn', \CRM_Utils_JS::writeObject(['input_type' => 'Select'], TRUE));
+    $fieldInfo = [
+      'input_type' => 'EntityRef',
+      'fk_entity' => 'Contact',
+      'data_type' => 'Integer',
+    ];
+    $entities = [
+      'Individual1' => [
+        'type' => 'Individual',
+        'label' => 'Individual 1',
+      ],
+      'Organization1' => [
+        'type' => 'Organization',
+        'label' => 'Organization 1',
+      ],
+      'Activity1' => [
+        'type' => 'Activity',
+        'label' => 'Activity 1',
+      ],
+    ];
+    AfformMetadataInjector::setFieldMetadata($afField, $fieldInfo, $entities);
+    $defn = \CRM_Utils_JS::getRawProps($afField->getAttribute('defn'));
+    $options = \CRM_Utils_JS::decode($defn['options']);
+    $this->assertCount(2, $options);
+    $this->assertEquals('Individual1', $options[0]['id']);
+    $this->assertEquals('Individual 1', $options[0]['label']);
+    $this->assertEquals('Organization1', $options[1]['id']);
+    $this->assertEquals('Organization 1', $options[1]['label']);
+  }
+
+  /**
+   * A placeholder already present on the incoming field metadata (e.g. from a custom field's
+   * "Placeholder" setting) must not be clobbered by the auto-generated "Select X" default.
+   */
+  public function testEntityRefCustomPlaceholderIsPreserved(): void {
+    $doc = \phpQuery::newDocumentHTML('<af-field name="test_field"></af-field>');
+    $afField = $doc->find('af-field')->get(0);
+    $fieldInfo = [
+      'input_type' => 'EntityRef',
+      'fk_entity' => 'Activity',
+      'data_type' => 'Integer',
+      'input_attrs' => [
+        'placeholder' => '- choose an activity -',
+        'multiple' => TRUE,
+      ],
+    ];
+    AfformMetadataInjector::setFieldMetadata($afField, $fieldInfo);
+    $defn = \CRM_Utils_JS::getRawProps($afField->getAttribute('defn'));
+    $inputAttrs = \CRM_Utils_JS::decode($defn['input_attrs']);
+    $this->assertEquals('- choose an activity -', $inputAttrs['placeholder']);
+  }
+
+  /**
+   * Without a custom placeholder, the auto-generated default still applies - and uses the
+   * plural entity title for multi-value fields.
+   */
+  public function testEntityRefDefaultPlaceholderUsesPluralForMultiple(): void {
+    $doc = \phpQuery::newDocumentHTML('<af-field name="test_field"></af-field>');
+    $afField = $doc->find('af-field')->get(0);
+    $fieldInfo = [
+      'input_type' => 'EntityRef',
+      'fk_entity' => 'Activity',
+      'data_type' => 'Integer',
+      'input_attrs' => [
+        'multiple' => TRUE,
+      ],
+    ];
+    AfformMetadataInjector::setFieldMetadata($afField, $fieldInfo);
+    $defn = \CRM_Utils_JS::getRawProps($afField->getAttribute('defn'));
+    $inputAttrs = \CRM_Utils_JS::decode($defn['input_attrs']);
+    $this->assertEquals('Select Activities', $inputAttrs['placeholder']);
+  }
+
 }

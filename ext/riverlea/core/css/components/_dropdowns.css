@@ -82,10 +82,10 @@
 .crm-contribpage-links-list-inner a:is(:hover,:focus),
 .crm-event-links-list-inner ul a:is(:hover,:focus),
 .crm-participant-list-inner ul a:is(:hover,:focus),
-#crm-create-new-list ul a:is(:hover,:focus), {
+#crm-create-new-list ul a:is(:hover,:focus) {
   text-decoration: none;
-  color: var(--crm-text-color);
-  background-color: var(--crm-container-bg-color);
+  color: var(--crm-dropdown-hover-text-color);
+  background-color: var(--crm-dropdown-hover-bg-color);
 }
 
 /* In-table dropdown */
@@ -133,6 +133,13 @@
   right: var(--crm-l-reg);
   left: auto;
 }
+.crm-container .btn-group.dropup .dropdown-menu-right::before,
+.crm-container .btn-group.pull-right.dropup .dropdown-menu::before {
+  top: auto;
+  bottom: -5px;
+  border-top: 5px solid var(--crm-dropdown-bg-color);
+  border-bottom: none;
+}
 .crm-container .btn-slide ul.panel li {
   padding: var(--crm-dropdown-padding);
   list-style: none;
@@ -150,6 +157,30 @@
 .crm-container .btn-slide ul.panel li a:focus {
   color: var(--crm-dropdown-hover-text-color);
   background-color: var(--crm-dropdown-hover-bg-color);
+}
+
+/* Admin dropdown links for editing a content block (e.g. an Afform or a Search Display) */
+#bootstrap-theme .crm-admin-block-context-dropdown {
+  position: absolute;
+  right: 0;
+  bottom: 1rem;
+}
+#bootstrap-theme .crm-admin-block-context-dropdown > button {
+  background: transparent;
+  color: var(--crm-text-color, black);
+  border-radius: 2rem;
+  height: inherit;
+  padding: 0 !important;
+  border: 0;
+  opacity: 0.6;
+}
+#bootstrap-theme .crm-admin-block-context-dropdown.open button,
+#bootstrap-theme .crm-admin-block-context-dropdown button:hover,
+#bootstrap-theme .crm-admin-block-context-dropdown button:focus {
+  background: transparent;
+  color: var(--crm-text-color, black);
+  opacity: 1;
+  box-shadow: none !important; /* vs dropdown-toggle */
 }
 
 /* Tooltip - contact dashboard/contact search */
@@ -288,6 +319,7 @@
 #bootstrap-theme .dropdown-menu li .form-inline,
 #bootstrap-theme .dropdown-menu li .form-inline a:not(.select2-choice) {
   color: var(--crm-dropdown-color);
+  padding: 0;
 }
 .crm-container .dropdown-menu > li {
   border-radius: var(--crm-l-radius);
@@ -299,37 +331,29 @@
   color: var(--crm-dropdown-color);
   border-radius: var(--crm-l-radius);
   white-space: nowrap;
+  text-decoration: none;
 }
 .crm-container .dropdown-menu > li:not(.disabled) > a i.crm-i {
   padding-right: var(--crm-l-small);
   color: var(--crm-dropdown-color);
 }
-.crm-container .dropdown-menu > li > a:hover,
-.crm-container .dropdown-menu > li > a:focus,
+:is(#bootstrap-theme,.crm-container) .dropdown-menu > li > a:is(:hover,:focus),
 .crm-container .dropdown-menu > .active > a,
-.crm-container .dropdown-menu > .active > a:hover,
-.crm-container .dropdown-menu > .active > a:focus {
-  color: var(--crm-dropdown-hover-text-color) !important; /* vs BS .btn-secondary:hover */
+.crm-container .dropdown-menu > .active > a:is(:hover,:focus) {
+  color: var(--crm-dropdown-hover-text-color);
   background-color: var(--crm-dropdown-hover-bg-color);
-  text-decoration: none;
   border-radius: var(--crm-l-radius);
 }
-.crm-container .dropdown-menu > li:not(.disabled) > a:hover i.crm-i,
-.crm-container .dropdown-menu > li:not(.disabled) > a:focus i.crm-i {
+.crm-container .dropdown-menu > li:not(.disabled) > a:is(:hover,:focus) i.crm-i {
   color: var(--crm-dropdown-hover-text-color);
 }
-.crm-container .dropdown-menu > .disabled > a,
-.crm-container .dropdown-menu > .disabled > a:hover,
-.crm-container .dropdown-menu > .disabled > a:focus {
-  color: var(--crm-inactive-color);
+.crm-container .dropdown-menu > li.disabled > a {
+  color: color-mix(in srgb, var(--crm-dropdown-color) 60%, var(--crm-dropdown-bg-color) 40%);
 }
-.crm-container .dropdown-menu > .disabled > a:hover,
-.crm-container .dropdown-menu > .disabled > a:focus {
-  text-decoration: none;
+:is(#bootstrap-theme,.crm-container) .dropdown-menu > .disabled > a:is(:hover,:focus) {
   cursor: not-allowed;
   background-color: transparent;
-  background-image: none;
-  filter: progid:DXImageTransform.Microsoft.gradient(enabled=false);
+  color: color-mix(in srgb, var(--crm-dropdown-color) 60%, var(--crm-dropdown-bg-color) 40%);
 }
 .crm-container .open > .dropdown-menu,
 .crm-container .open .btn.dropdown-toggle + .dropdown-menu {
@@ -362,13 +386,8 @@
   right: 0;
   left: auto;
 }
-.crm-container .dropup .caret,
-.crm-container .navbar-fixed-bottom .dropdown .caret {
-  content: "";
-  border-top: 0;
-  border-bottom: 4px dashed;
-}
 .crm-container .dropup .dropdown-menu,
+.crm-container .dropup .btn.dropdown-toggle + .dropdown-menu,
 .crm-container .navbar-fixed-bottom .dropdown .dropdown-menu {
   top: auto;
   bottom: 100%;
@@ -404,9 +423,6 @@
 .crm-container .dropdown-menu.dropdown-menu-right {
   right: 0;
   left: unset;
-}
-.crm-container .dropdown-menu li input {
-  width: -moz-available;
 }
 @media (min-width: 768px) {
   .crm-container .navbar-right .dropdown-menu {

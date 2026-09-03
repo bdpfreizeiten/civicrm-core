@@ -155,7 +155,7 @@
   --crm-contact-border: 0 solid transparent;
   --crm-contact-radius: var(--crm-r-5);
   --crm-contact-direction: grid;
-  --crm-side-tabs-width: 220px;
+  --crm-contact-side-tabs-width: 220px;
   --crm-contact-tabs-flow: column;
   --crm-contact-tabs-gap: 0;
   --crm-contact-tabs-bg-color: var(--crm-c-blue-overlay);
@@ -209,7 +209,7 @@
 /* Notifications */
   --crm-notify-bg-color: var(--crm-paper);
   --crm-notify-color: var(--crm-text-color);
-  --crm-notify-accent-border: 0.875rem 0 0 0;
+  --crm-notify-accent-border-width: 0.875rem 0 0 0;
   --crm-notify-radius: 4px;
   --crm-notify-danger-color: var(--crm-danger-color);
   --crm-notify-warning-color: var(--crm-warning-color);

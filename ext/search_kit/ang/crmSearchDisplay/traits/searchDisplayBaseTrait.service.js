@@ -30,12 +30,37 @@
         for (let p=0; p < placeholderCount; ++p) {
           this.placeholders.push({});
         }
-        // Break reference so original settings are preserved
-        this.columns = _.cloneDeep(this.settings.columns);
-        this.columns.forEach((col) => {
+        const isSubsearch = $element.closest('.crm-search-col-type-subsearch').length > 0;
+
+        // Add keys used by crmSearchDisplayTable.toggleColumns
+        const setColumnDefaults = (col) => {
           col.enabled = true;
           col.fetched = true;
-        });
+        };
+
+        // Useful for custom include columns; used by afAdmin/afListPlacementColumn.html
+        $scope.crmUrl = CRM.url;
+
+        // This will ony be true if running the search outside of an Afform.
+        // Within an Afform, default columns will be set by AfformSearchMetadataInjector.
+        if (this.settings.columnMode === 'auto' && (!this.settings.columns || !this.settings.columns.length)) {
+          // start with no columns in case we run before
+          // we've fetched the right ones
+          this.columns = [];
+          crmApi4('SearchDisplay', 'getDefault', {
+            savedSearch: this.search,
+            select: ['settings'],
+          })
+          .then((result) => this.columns = result[0].settings.columns)
+          .then(() => this.columns.forEach(setColumnDefaults))
+          .catch((error) => CRM.alert(ts('Error loading search columns')));
+        }
+        else {
+          // Break reference so original settings are preserved
+          this.columns = _.cloneDeep(this.settings.columns);
+          this.columns.forEach(setColumnDefaults);
+        }
+
         ctrl.onInitialize.forEach(callback => callback.call(ctrl, $scope, $element));
 
         // _.debounce used here to trigger the initial search immediately but prevent subsequent launches within 300ms
@@ -56,7 +81,7 @@
         if (contactTab && !$element.is($('#' + contactTab + ' [search][display]').first())) {
           contactTab = null;
         }
-        let hasCounter = contactTab || ctrl.hasOwnProperty('totalCount');
+        let hasCounter = !isSubsearch && (contactTab || ctrl.hasOwnProperty('totalCount'));
         if (hasCounter) {
           $scope.$watch('$ctrl.rowCount', function(rowCount) {
             // Update totalCount only if no user filters are set
@@ -76,10 +101,14 @@
         }
 
         // Popup forms in this display or surrounding Afform trigger a refresh
-        $element.closest('form').on('crmPopupFormSuccess crmFormSuccess', function() {
+        const $closestForm = $element.closest('form');
+        const onFormSuccess = () => {
           ctrl.rowCount = null;
           ctrl.getResultsPronto();
-        });
+        };
+        if (!isSubsearch) {
+          $closestForm.on('crmPopupFormSuccess crmFormSuccess', onFormSuccess);
+        }
 
         // When filters are changed, trigger callbacks and refresh search (if there's no search button)
         function onChangeFilters() {
@@ -127,11 +156,14 @@
           });
         }
 
+        // Trigger an event when the searchDisplay has completely (re-)loaded
+        this.onPostRun.push(() => $element[0].dispatchEvent(new Event('load')));
+
         // Set up watches to refresh search results when needed.
         // Because `angular.$watch` runs immediately as well as on subsequent changes,
         // this also kicks off the first run of the search (if there's no search button).
         function setUpWatches() {
-          if (ctrl.afFieldset) {
+          if (ctrl.afFieldset && !isSubsearch) {
             $scope.$watch(ctrl.afFieldset.getFilterValues, onChangeFilters, true);
           }
           if (ctrl.settings.pager && ctrl.settings.pager.expose_limit) {
@@ -140,13 +172,19 @@
           $scope.$watch('$ctrl.filters', onChangeFilters, true);
         }
 
+        // Before testing visibility, ensure the search display tag has a layout box.
+        // Because `<crm-search-display-x>` is an unknown tag to browsers, some of them,
+        // e.g. Safari, do not assign it a layout box, making visibility indeterminate.
+        $element.css('display', 'block');
+
         // If the search display is visible, go ahead & run it
+        let checkVisibility;
         if ($element.is(':visible')) {
           setUpWatches();
         }
         // Wait until display is visible
         else {
-          let checkVisibility = $interval(() => {
+          checkVisibility = $interval(() => {
             if ($element.is(':visible')) {
               $interval.cancel(checkVisibility);
               setUpWatches();
@@ -169,6 +207,19 @@
             });
           }
         }, 900);
+
+        // Clean up the form handler, visibility poller and pending debounced
+        // searches, which are not released by the $scope itself
+        $scope.$on('$destroy', () => {
+          if (!isSubsearch) {
+            $closestForm.off('crmPopupFormSuccess crmFormSuccess', onFormSuccess);
+          }
+          if (checkVisibility) {
+            $interval.cancel(checkVisibility);
+          }
+          ctrl.getResultsPronto.cancel();
+          ctrl.getResultsSoon.cancel();
+        });
       },
 
       hasExtraFirstColumn: function() {
@@ -273,13 +324,23 @@
       },
 
       getFieldClass: function(colIndex, colData) {
-        return (colData.cssClass || '') + ' crm-search-col-type-' + this.settings.columns[colIndex].type + (this.settings.columns[colIndex].break ? '' : ' crm-inline-block');
+        return (colData.cssClass || '') + ' crm-search-col-type-' + this.columns[colIndex].type + (this.columns[colIndex].break ? '' : ' crm-inline-block');
+      },
+
+      // Returns an inline style string for a colored badge, using CRM.utils.colorContrast
+      // to pick readable text color. Used by colType/field.html for the `colors` column option.
+      getColorStyle: function(color) {
+        return color ? 'background-color: ' + color + '; color: ' + CRM.utils.colorContrast(color) + ';' : '';
       },
 
       getFieldTemplate: function(colIndex, colData) {
-        let colType = this.settings.columns[colIndex].type;
+        let colType = this.columns[colIndex].type;
         if (colType === 'include') {
-          return this.settings.columns[colIndex].path;
+          // Throw exception if path doesn't start with '~/'
+          if (/^~\/.+/.test(this.columns[colIndex].path) === false) {
+            throw 'Invalid path for include column: "' + this.columns[colIndex].path + '"';
+          }
+          return this.columns[colIndex].path;
         }
         if (colType === 'field') {
           if (colData.edit) {

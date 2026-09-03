@@ -368,7 +368,7 @@ class CRM_Core_SelectValues {
         }
 
         $date['format'] = $dao->date_format;
-        $date['time'] = (bool) $dao->time_format;
+        $date['time'] = $dao->time_format ? $dao->time_format * 12 : FALSE;
       }
 
       if (empty($date['format'])) {
@@ -698,9 +698,15 @@ class CRM_Core_SelectValues {
       '{case.modified_date}' => ts('Modified Date'),
     ];
 
-    $customFields = CRM_Core_BAO_CustomField::getFields('Case', FALSE, FALSE, $caseTypeId);
-    foreach ($customFields as $id => $field) {
-      $tokens["{case.custom_$id}"] = "{$field['label']} :: {$field['groupTitle']}";
+    $customFilters = ['extends' => 'Case', 'is_active' => TRUE];
+    if ($caseTypeId) {
+      $customFilters['extends_entity_column_value'] = [$caseTypeId, NULL];
+    }
+    $customGroups = CRM_Core_BAO_CustomGroup::getAll($customFilters);
+    foreach ($customGroups as $customGroup) {
+      foreach ($customGroup['fields'] as $id => $field) {
+        $tokens["{case.custom_$id}"] = "{$field['label']} :: {$customGroup['title']}";
+      }
     }
     return $tokens;
   }
@@ -1149,6 +1155,14 @@ class CRM_Core_SelectValues {
     return $optionValues;
   }
 
+  /**
+   * Get option values for quicksearch.
+   *
+   * The 'join' key is used by ContactAutocompleteProvider to add explicit joins.
+   * The 'adv_search_legacy' key is used by crm.menubar.js when redirecting to advanced search.
+   *
+   * @return array[]
+   */
   public static function getQuicksearchOptions(): array {
     $includeEmail = Civi::settings()->get('includeEmailInName');
     $options = [
@@ -1173,29 +1187,38 @@ class CRM_Core_SelectValues {
         'label' => ts('Last Name'),
       ],
       [
-        'key' => 'email_primary.email',
+        'key' => 'legal_name',
+        'label' => ts('Legal Name'),
+      ],
+      [
+        'key' => 'Email.email',
         'label' => ts('Email'),
         'adv_search_legacy' => 'email',
+        'join' => ['Email AS Email', 'INNER', ['Email.contact_id', '=', 'id']],
       ],
       [
-        'key' => 'phone_primary.phone_numeric',
+        'key' => 'Phone.phone_numeric',
         'label' => ts('Phone'),
         'adv_search_legacy' => 'phone_numeric',
+        'join' => ['Phone AS Phone', 'INNER', ['Phone.contact_id', '=', 'id']],
       ],
       [
-        'key' => 'address_primary.street_address',
+        'key' => 'Address.street_address',
         'label' => ts('Street Address'),
         'adv_search_legacy' => 'street_address',
+        'join' => ['Address AS Address', 'INNER', ['Address.contact_id', '=', 'id']],
       ],
       [
-        'key' => 'address_primary.city',
+        'key' => 'Address.city',
         'label' => ts('City'),
         'adv_search_legacy' => 'city',
+        'join' => ['Address AS Address', 'INNER', ['Address.contact_id', '=', 'id']],
       ],
       [
-        'key' => 'address_primary.postal_code',
+        'key' => 'Address.postal_code',
         'label' => ts('Postal Code'),
         'adv_search_legacy' => 'postal_code',
+        'join' => ['Address AS Address', 'INNER', ['Address.contact_id', '=', 'id']],
       ],
       [
         'key' => 'employer_id.sort_name',
@@ -1205,9 +1228,44 @@ class CRM_Core_SelectValues {
         'key' => 'job_title',
         'label' => ts('Job Title'),
       ],
+      [
+        'key' => 'Contribution.id',
+        'label' => ts('Contribution ID'),
+        'join' => ['Contribution AS Contribution', 'LEFT', ['Contribution.contact_id', '=', 'id']],
+        'adv_search_legacy' => 'contribution_id',
+      ],
+      [
+        'key' => 'Contribution.trxn_id',
+        'label' => ts('Transaction ID'),
+        'join' => ['Contribution AS Contribution', 'LEFT', ['Contribution.contact_id', '=', 'id']],
+        'adv_search_legacy' => 'contribution_trxn_id',
+      ],
+      [
+        'key' => 'Contribution.invoice_number',
+        'label' => ts('Invoice Number'),
+        'join' => ['Contribution AS Contribution', 'LEFT', ['Contribution.contact_id', '=', 'id']],
+        'adv_search_legacy' => 'invoice_number',
+      ],
     ];
+
+    $ftsIndices = Civi::service('civi.schema.fts')->getIndicesForEntity('Contact');
+    foreach ($ftsIndices as $key => $defn) {
+      $options[] = [
+        'key' => $key,
+        'label' => ts('Full Text Search: %1', [1 => $defn['label']]),
+      ];
+    }
+
     $customGroups = CRM_Core_BAO_CustomGroup::getAll(['extends' => 'Contact', 'is_active' => TRUE], CRM_Core_Permission::VIEW);
     foreach ($customGroups as $group) {
+      $join = NULL;
+      if (!empty($group['is_multiple'])) {
+        $join = [
+          "Custom_{$group['name']} AS {$group['name']}",
+          'INNER',
+          ['id', '=', "{$group['name']}.entity_id"],
+        ];
+      }
       foreach ($group['fields'] as $field) {
         if (in_array($field['data_type'], ['Date', 'File', 'ContactReference', 'EntityReference'])) {
           continue;
@@ -1216,6 +1274,7 @@ class CRM_Core_SelectValues {
           'key' => $group['name'] . '.' . $field['name'] . ($field['option_group_id'] ? ':label' : ''),
           'label' => $group['title'] . ': ' . $field['label'],
           'adv_search_legacy' => 'custom_' . $field['id'],
+          'join' => $join,
         ];
       }
     }
@@ -1323,6 +1382,16 @@ class CRM_Core_SelectValues {
   }
 
   /**
+   * TODO: Support more ops like 'INTERSECT' & 'EXCEPT' when moving to MySQL 8.
+   */
+  public static function setOperations(): array {
+    return [
+      'UNION ALL' => ts('Union All'),
+      'UNION DISTINCT' => ts('Union Distinct'),
+    ];
+  }
+
+  /**
    * Callback for Role.permissions pseudoconstant values.
    *
    * Permissions for Civi Standalone, not used by CMS-based systems.
@@ -1352,6 +1421,17 @@ class CRM_Core_SelectValues {
       'combined' => ts('One combined activity'),
       'combined-attached' => ts('One combined activity plus one file attachment'),
       // 'multiple-attached' <== not worth the work
+    ];
+  }
+
+  /**
+   * Options for UFGroup.is_cms_user
+   */
+  public static function profileUserRegistrationMode(): array {
+    return [
+      0 => ts('Disabled'),
+      1 => ts('Enabled, but not required'),
+      2 => ts('Required'),
     ];
   }
 

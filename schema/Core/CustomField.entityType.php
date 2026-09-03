@@ -200,6 +200,15 @@ return [
       'add' => '1.1',
       'default' => FALSE,
     ],
+    'file_is_public' => [
+      'title' => ts('File Is Public'),
+      'sql_type' => 'boolean',
+      'input_type' => 'Toggle',
+      'required' => TRUE,
+      'description' => ts('Controls whether file is stored in public or private directory.'),
+      'add' => '6.14',
+      'default' => FALSE,
+    ],
     'options_per_line' => [
       'title' => ts('Field Options Per Line'),
       'sql_type' => 'int unsigned',
@@ -267,6 +276,7 @@ return [
       'input_type' => 'Text',
       'description' => ts('Name of the column that holds the values for this field.'),
       'add' => '2.0',
+      'readonly' => TRUE,
     ],
     'option_group_id' => [
       'title' => ts('Field Option Group ID'),
@@ -315,6 +325,14 @@ return [
       'description' => ts('Should the multi-record custom field values be displayed in tab table listing'),
       'add' => '4.5',
       'default' => FALSE,
+    ],
+    'control_field' => [
+      'title' => ts('Depends on'),
+      'sql_type' => 'varchar(255)',
+      'input_type' => 'Select',
+      'description' => ts('Name of the field that this field depends on.'),
+      'add' => '6.18',
+      'default' => NULL,
     ],
     'fk_entity' => [
       'title' => ts('Entity'),

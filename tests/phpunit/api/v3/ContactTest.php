@@ -30,6 +30,7 @@
  */
 
 use Civi\Api4\Contact;
+use Civi\Api4\File;
 
 /**
  *  Test APIv3 civicrm_contact* functions
@@ -3845,15 +3846,14 @@ class api_v3_ContactTest extends CiviUnitTestCase {
    */
   public function testMergeCustomFields(): void {
     $contact1 = $this->individualCreate();
-    // Not sure this is quite right but it does get it into the file table
-    $file = $this->callAPISuccess('Attachment', 'create', [
-      'name' => 'header.txt',
-      'mime_type' => 'text/plain',
-      'description' => 'My test description',
-      'content' => 'My test content',
-      'entity_table' => 'civicrm_contact',
-      'entity_id' => $contact1,
-    ]);
+    $file = File::create(FALSE)
+      ->setValues([
+        'mime_type' => 'text/plain',
+        'file_name' => 'header.txt',
+        'content' => 'My test content',
+      ])
+      ->execute()
+      ->single();
 
     $this->createCustomGroupWithFieldsOfAllTypes();
     $fileField = $this->getCustomFieldName('file');
@@ -3909,7 +3909,6 @@ class api_v3_ContactTest extends CiviUnitTestCase {
     ]);
     $this->assertEquals(TRUE, $contact1IsDeletedAfterMerge);
     $mergedContact = $this->callAPISuccessGetSingle('Contact', ['id' => $contact2, 'return' => $customFieldKeys]);
-    $this->assertEquals($contact2, CRM_Core_DAO::singleValueQuery('SELECT entity_id FROM civicrm_entity_file WHERE file_id = ' . $file['id']));
     foreach ($customFieldKeys as $key) {
       $this->assertEquals($contact1CustomFieldValues[$key], $mergedContact[$key]);
     }
@@ -4771,36 +4770,6 @@ class api_v3_ContactTest extends CiviUnitTestCase {
       'auto_flip' => FALSE,
     ]);
     return $this->callAPISuccessGetSingle('Contact', ['id' => $isReverse ? $this->ids['contact'][1] : $this->ids['contact'][0]]);
-  }
-
-  /**
-   * Test a lack of fatal errors when the where contains an emoji.
-   *
-   * By default our DBs are not 🦉 compliant. This test will age
-   * out when we are.
-   */
-  public function testEmojiInWhereClause(): void {
-    $schemaNeedsAlter = \CRM_Core_BAO_SchemaHandler::databaseSupportsUTF8MB4();
-    if ($schemaNeedsAlter) {
-      CRM_Core_DAO::executeQuery("
-        ALTER TABLE civicrm_contact MODIFY COLUMN
-        `first_name` VARCHAR(64) CHARACTER SET utf8 COLLATE utf8_unicode_ci DEFAULT NULL COMMENT 'First Name.',
-        CHARSET utf8 COLLATE utf8_unicode_ci
-      ");
-      Civi::$statics['CRM_Core_BAO_SchemaHandler'] = [];
-    }
-    $this->callAPISuccess('Contact', 'get', [
-      'debug' => 1,
-      'first_name' => '🦉Claire',
-    ]);
-    if ($schemaNeedsAlter) {
-      CRM_Core_DAO::executeQuery("
-        ALTER TABLE civicrm_contact MODIFY COLUMN
-        `first_name` VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'First Name.',
-        CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci
-      ");
-      Civi::$statics['CRM_Core_BAO_SchemaHandler'] = [];
-    }
   }
 
   /**

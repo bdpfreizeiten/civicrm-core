@@ -299,9 +299,9 @@
                 filters: {},
               };
             if (option.val() === 'sort_name') {
-              params.input = request.term;
+              params.input = _.trim(request.term);
             } else {
-              params.filters[option.val()] = request.term;
+              params.filters[option.val()] = _.trim(request.term);
             }
             // Specialized Autocomplete SearchDisplay: @see ContactAutocompleteProvider
             CRM.api4('Contact', 'autocomplete', params).then(function(result) {
@@ -392,7 +392,7 @@
           $('#crm-qsearch-input').focus();
           CRM.menubar.close();
         }
-      });
+      }).attr('aria-label', ts('Quick search'));
       $('#crm-qsearch form[name=search_block]').on('submit', function() {
         const searchValue = $('#crm-qsearch-input').val();
         const searchkey = $('#crm-qsearch-input').attr('name');
@@ -496,7 +496,7 @@
       '</li>',
     drillTpl:
       '<li class="crm-menu-border-bottom" data-name="MenubarDrillDown">' +
-        '<a href="#"><input type="text" id="crm-menubar-drilldown" placeholder="' + _.escape(ts('Find menu item...')) + '"></a>' +
+        '<a href="#"><input type="text" id="crm-menubar-drilldown" placeholder="' + _.escape(ts('Find menu item...')) + '" aria-label="' + _.escape(ts('Find menu item...')) + '"><span class="sr-only">' + _.escape(ts('Find menu item...')) + '></span></a>' +
         '<ul></ul>' +
       '</li>',
     branchTpl:
@@ -508,6 +508,8 @@
             '<% } %>' +
             '<% if (item.label) { %>' +
               '<span><%- item.label %></span>' +
+            '<% } else { %>' +
+              '<span class="sr-only"><%- item.name %></span>' +
             '<% } %>' +
           '</a>' +
           '<% if (item.child) { %>' +

@@ -146,6 +146,7 @@ class CRM_Core_BAO_CustomValueTable {
               break;
 
             case 'RichTextEditor':
+            case 'Currency':
               $type = 'String';
               break;
 
@@ -299,7 +300,7 @@ class CRM_Core_BAO_CustomValueTable {
    *   the mysql data store placeholder
    */
   public static function fieldToSQLType(string $type, $maxLength = NULL, bool $isSerialized = FALSE, ?string $fkEntity = NULL) {
-    if ($fkEntity) {
+    if ($fkEntity && $fkEntity !== 'Currency') {
       $type = self::getDataTypeForPrimaryKey($fkEntity);
     }
 
@@ -310,6 +311,10 @@ class CRM_Core_BAO_CustomValueTable {
     switch ($type) {
       case 'String':
         $maxLength = $maxLength ?: 255;
+        return "varchar($maxLength)";
+
+      case 'Currency':
+        $maxLength = $maxLength ?: 3;
         return "varchar($maxLength)";
 
       case 'Link':
@@ -479,7 +484,7 @@ class CRM_Core_BAO_CustomValueTable {
       $limit = " LIMIT " . CRM_Utils_Type::escape($DTparams['offset'], 'Integer') . ", " . CRM_Utils_Type::escape($DTparams['rowCount'], 'Integer');
     }
     if (!empty($DTparams['sort'])) {
-      $orderBy = ' ORDER BY ' . CRM_Utils_Type::escape($DTparams['sort'], 'String');
+      $orderBy = ' ORDER BY ' . CRM_Utils_Type::escape($DTparams['sort'], 'MysqlOrderBy');
     }
 
     // First find all the fields that extend this type of entity.

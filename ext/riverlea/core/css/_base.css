@@ -171,12 +171,6 @@ body {
   color: var(--crm-text-color);
 }
 
-/* iFrame */
-
-body.civicrm-iframe-page {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
-  font-size: 100%;
-}
 
 /* Core type */
 
@@ -208,7 +202,7 @@ body.civicrm-iframe-page {
   text-transform: uppercase;
 }
 .crm-container h3,
-#bootstrap-theme h3 {
+#bootstrap-theme h3:not(.crm-dashlet-header h3) {
   background-color: var(--crm-heading-bg-color);
   font-size: var(--crm-l-reg-1);
   font-weight: bold;
@@ -241,6 +235,7 @@ dl dl {
 .crm-container .status-warning,
 .crm-container .crm-error,
 .crm-container td.tasklist a:link,
+.crm-container label.error,
 #bootstrap-theme .has-error .help-block,
 #bootstrap-theme .has-error .control-label,
 #bootstrap-theme .has-error .radio,
@@ -281,7 +276,7 @@ dl dl {
 }
 .crm-container .disabled,
 .crm-container .crm-disabled,
-.crm-container .disabled *:not(.btn,button,i,span,a),
+.crm-container .disabled *:not(.btn,button,i,span,a,em),
 .crm-container .cancelled,
 .crm-container .cancelled td,
 .crm-container li.disabled a.ui-tabs-anchor {

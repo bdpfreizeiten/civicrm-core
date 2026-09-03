@@ -15,7 +15,7 @@
           }
 
           ngModel.$render = function () {
-            element.val(_.isArray(ngModel.$viewValue) ? ngModel.$viewValue.join(',') : ngModel.$viewValue).change();
+            element.val(Array.isArray(ngModel.$viewValue) ? ngModel.$viewValue.join(',') : ngModel.$viewValue).change();
           };
 
           element
@@ -42,7 +42,7 @@
                 $input
                   .datepicker({
                     beforeShow: function() {
-                      const existingSelections = _.pluck($el.select2('data') || [], 'id');
+                      const existingSelections = ($el.select2('data') || []).map((selection) => selection.id);
                       return {
                         changeMonth: true,
                         changeYear: true,

@@ -35,7 +35,7 @@ return [
     ],
     'name' => [
       'title' => ts('Tag Name'),
-      'sql_type' => 'varchar(64)',
+      'sql_type' => 'varchar(128)',
       'input_type' => 'Text',
       'required' => TRUE,
       'description' => ts('Unique machine name'),
@@ -43,7 +43,7 @@ return [
     ],
     'label' => [
       'title' => ts('Tag Label'),
-      'sql_type' => 'varchar(64)',
+      'sql_type' => 'varchar(128)',
       'input_type' => 'Text',
       'required' => TRUE,
       'description' => ts('User-facing tag name'),
@@ -106,7 +106,7 @@ return [
     ],
     'used_for' => [
       'title' => ts('Used For'),
-      'sql_type' => 'varchar(64)',
+      'sql_type' => 'varchar(512)',
       'input_type' => 'Select',
       'add' => '3.2',
       'default' => NULL,
@@ -134,7 +134,7 @@ return [
     'color' => [
       'title' => ts('Color'),
       'sql_type' => 'varchar(255)',
-      'input_type' => 'Text',
+      'input_type' => 'Color',
       'description' => ts('Hex color value e.g. #ffffff'),
       'add' => '4.7',
       'default' => NULL,

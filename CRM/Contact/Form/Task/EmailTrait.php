@@ -168,17 +168,20 @@ trait CRM_Contact_Form_Task_EmailTrait {
 
     $emailAttributes = [
       'class' => 'huge',
+      'title' => ts('Send email to'),
     ];
     $this->add('text', 'to', ts('To'), $emailAttributes, TRUE);
 
     $this->addEntityRef('cc_id', ts('CC'), [
       'entity' => 'Email',
       'multiple' => TRUE,
+      'title' => ts('CC Contacts'),
     ]);
 
     $this->addEntityRef('bcc_id', ts('BCC'), [
       'entity' => 'Email',
       'multiple' => TRUE,
+      'title' => ts('BCC Contacts'),
     ]);
 
     $setDefaults = TRUE;
@@ -239,7 +242,8 @@ trait CRM_Contact_Form_Task_EmailTrait {
 
     $this->add('text', 'subject', ts('Subject'), ['size' => 50, 'maxlength' => 254], TRUE);
 
-    $this->add('select', 'from_email_address', ts('From'), $this->getFromEmails(), TRUE, ['class' => 'crm-select2 huge']);
+    $fromEmailSelect = $this->add('select', 'from_email_address', ts('From'), $this->getFromEmails(), TRUE, ['class' => 'crm-select2 huge', 'title' => ts('From Email Address')]);
+    $fromEmailSelect->setOptionTextEscaped();
 
     CRM_Mailing_BAO_Mailing::commonCompose($this);
 
@@ -260,12 +264,13 @@ trait CRM_Contact_Form_Task_EmailTrait {
           'create' => TRUE,
           'api' => ['params' => ['is_deceased' => 0]],
         ],
+        'title' => ts('Assigned To'),
       ],
       'followup_activity_type_id' => [
         'type' => 'select',
         'label' => ts('Followup Activity'),
         'attributes' => ['' => '- ' . ts('select activity') . ' -'] + CRM_Core_PseudoConstant::ActivityType(FALSE),
-        'extra' => ['class' => 'crm-select2'],
+        'extra' => ['class' => 'crm-select2', 'title' => ts('Followup Activity')],
       ],
       'followup_activity_subject' => [
         'type' => 'text',
@@ -273,6 +278,7 @@ trait CRM_Contact_Form_Task_EmailTrait {
         'attributes' => CRM_Core_DAO::getAttribute('CRM_Activity_DAO_Activity',
           'subject'
         ),
+        'title' => ts('Followup Actvity Subject'),
       ],
     ];
 
@@ -780,7 +786,7 @@ trait CRM_Contact_Form_Task_EmailTrait {
           'msg_html' => $html,
           'msg_subject' => $this->getSubject(),
         ],
-        'tokenContext' => array_merge(['schema' => $this->getTokenSchema()], ($values['schema'] ?? [])),
+        'tokenContext' => array_merge(['schema' => array_keys($values['schema'] ?? [])], ($values['schema'] ?? [])),
         'contactId' => $contactId,
         'disableSmarty' => !CRM_Utils_Constant::value('CIVICRM_MAIL_SMARTY'),
       ]);
@@ -865,13 +871,11 @@ trait CRM_Contact_Form_Task_EmailTrait {
     // CRM-5916: strip [case #…] before saving the activity (if present in subject)
     $activityParams['subject'] = preg_replace('/\[case #([0-9a-h]{7})\] /', '', $activityParams['subject']);
 
-    // add the attachments to activity params here
-    if ($attachments) {
-      // first process them
-      $activityParams = array_merge($activityParams, $attachments);
-    }
-
     $activity = civicrm_api3('Activity', 'create', $activityParams);
+
+    if ($attachments) {
+      \CRM_Core_BAO_File::processAttachment($attachments, 'civicrm_activity', $activity['id']);
+    }
 
     return $activity['id'];
   }

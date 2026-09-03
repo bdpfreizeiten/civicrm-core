@@ -27,8 +27,6 @@ use Civi\Api4\Utils\CoreUtil;
  * @method $this setLoadOptions(bool|array $value)
  * @method bool|array getLoadOptions()
  * @method $this setAction(string $value)
- * @method $this setValues(array $values)
- * @method array getValues()
  */
 class BasicGetFieldsAction extends BasicGetAction {
 
@@ -120,6 +118,8 @@ class BasicGetFieldsAction extends BasicGetAction {
   protected function formatResults(&$values, $isInternal) {
     $fieldDefaults = array_column($this->fields(), 'default_value', 'name') +
       array_fill_keys(array_column($this->fields(), 'name'), NULL);
+    // Add the default type if it is missing (e.g. Setting)
+    $fieldDefaults += ['type' => 'Field'];
     // Enforce field permissions
     if ($this->checkPermissions) {
       foreach ($values as $key => $field) {
@@ -249,32 +249,23 @@ class BasicGetFieldsAction extends BasicGetAction {
 
   private function getCallbackCacheKey($field): ?string {
     $reflector = \Civi\Core\Resolver::singleton()->getReflector($field['pseudoconstant']['callback']);
-    // we need to stringify the callback itself - depends on why
+    // Stringify the callback function name using safe characters for CIVICRM_PSR16_STRICT
     $callbackName = match ($reflector::class) {
-      'ReflectionMethod' => "{$reflector->class}::{$reflector->name}",
+      'ReflectionMethod' => \CRM_Utils_String::munge($reflector->class) . ".$reflector->name",
       default => NULL,
     };
-    // if we dont know how to stringify the callback then we cant cache
+    // if we don't know how to stringify the callback, then we can't cache.
     if (!$callbackName) {
       return NULL;
     }
-    switch ($reflector->getNumberOfParameters()) {
-      case 0:
-        // no args are passed, can cache using just the callback name
-        return implode('_', [\CRM_Core_Config::domainID(), \CRM_Core_I18n::getLocale(), 'pseudoconstantCallback', $callbackName]);
-
-      case 1:
-        // callback takes field name, include that in the cache key
-        return implode('_', [\CRM_Core_Config::domainID(), \CRM_Core_I18n::getLocale(), 'pseudoconstantCallback', $callbackName, $field['name']]);
-
-      default:
-        // callback takes row values - dont attempt to cache
-        return NULL;
+    return match ($reflector->getNumberOfParameters()) {
+      // no args are passed - can cache using just the callback name
+      0 => implode('_', [\CRM_Core_Config::domainID(), \CRM_Core_I18n::getLocale(), 'pseudoconstantCallback', $callbackName]),
+      // callback takes field name - include that in the cache key
+      1 => implode('_', [\CRM_Core_Config::domainID(), \CRM_Core_I18n::getLocale(), 'pseudoconstantCallback', $callbackName, $field['name']]),
+      // callback takes row values - don't attempt to cache
+      default => NULL,
     };
-    if ($cacheKeyParts) {
-      return implode('_', $cacheKeyParts);
-    }
-
   }
 
   private function getOptionValues(string $optionGroupName): array {
@@ -298,6 +289,9 @@ class BasicGetFieldsAction extends BasicGetAction {
     $optionGroupId = \CRM_Core_DAO::getFieldValue('CRM_Core_DAO_OptionGroup', $optionGroupName, 'id', 'name');
     $select = CoreUtil::getOptionValueFields($optionGroupName);
     unset($select['id'], $select['value']);
+    // Quote the column names: an option group is free to declare a field whose name
+    // is a reserved word, e.g. `grouping`.
+    $select = array_map(fn($column) => "`$column`", $select);
     array_unshift($select, 'value AS id');
     $query = "SELECT " . implode(', ', $select) . " FROM civicrm_option_value WHERE option_group_id = %1 ORDER BY weight";
     return \CRM_Core_DAO::executeQuery($query, [1 => [$optionGroupId, 'Int']])->fetchAll();

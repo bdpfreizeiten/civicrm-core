@@ -21,7 +21,10 @@ namespace api\v4\Action;
 
 use api\v4\Api4TestBase;
 use Civi\API\Exception\UnauthorizedException;
+use Civi\API\Event\PrepareEvent;
 use Civi\Api4\Contact;
+use Civi\Api4\Group;
+use Civi\Api4\Mailing;
 use Civi\Api4\MockBasicEntity;
 use Civi\Api4\EntitySet;
 use Civi\Api4\SavedSearch;
@@ -58,6 +61,7 @@ class AutocompleteTest extends Api4TestBase implements HookInterface, Transactio
   }
 
   public function setUp(): void {
+    \CRM_Core_BAO_ConfigSetting::enableAllComponents();
     $this->hookCallback = NULL;
     $this->autocompleteRunCount = 0;
     // Ensure MockBasicEntity gets added via above listener
@@ -372,6 +376,41 @@ class AutocompleteTest extends Api4TestBase implements HookInterface, Transactio
     $this->assertEquals('Donors contributed > $100', $result[0]['label']);
   }
 
+  public function testMailingRecipientsAutocomplete(): void {
+    Group::delete()->addWhere('id', '>', 0)->execute();
+    Mailing::delete()->addWhere('id', '>', 0)->execute();
+    $group = $this->createTestRecord('Group', [
+      'title' => 'Test Recipient Group',
+      'group_type:name' => 'Mailing List',
+    ]);
+    $mailing = $this->createTestRecord('Mailing', [
+      'name' => 'Test Newsletter',
+      'subject' => 'July Newsletter Subject',
+      'is_completed' => TRUE,
+    ]);
+
+    $result = EntitySet::autocomplete()
+      ->setInput('Test')
+      ->setFieldName('Mailing.recipients_include')
+      ->setFormName('crmMailing.0')
+      ->execute();
+
+    $this->assertCount(2, $result);
+
+    $rows = array_column((array) $result, NULL, 'id');
+
+    $groupRow = $rows['groups_' . $group['id']] ?? NULL;
+    $this->assertNotNull($groupRow);
+    $this->assertSame('Test Recipient Group', $groupRow['label']);
+    $this->assertSame('fa-group', $groupRow['icon']);
+
+    $mailingRow = $rows['mailings_' . $mailing['id']] ?? NULL;
+    $this->assertNotNull($mailingRow);
+    $this->assertSame('Test Newsletter', $mailingRow['label']);
+    $this->assertSame('fa-envelope', $mailingRow['icon']);
+    $this->assertStringContainsString('Sent Mailing', $mailingRow['description'][0]);
+  }
+
   /**
    * Emulates the behavior of `$.fn.crmAutocomplete` in Common.js
    *
@@ -398,6 +437,210 @@ class AutocompleteTest extends Api4TestBase implements HookInterface, Transactio
       }
     } while ($more);
     return $allResults;
+  }
+
+  public function testMultiRecordCustomValueAutocomplete(): void {
+    $customGroup = $this->createTestRecord('CustomGroup', [
+      'name' => __FUNCTION__,
+      'title' => __FUNCTION__,
+      'extends' => 'Contact',
+      'is_multiple' => TRUE,
+    ]);
+    $this->createTestRecord('CustomField', [
+      'custom_group_id' => $customGroup['id'],
+      'name' => 'Title',
+      'label' => 'Title',
+      'data_type' => 'String',
+      'html_type' => 'Text',
+    ]);
+
+    $contacts = $this->saveTestRecords('Contact', [
+      'records' => [
+        ['first_name' => 'Alpha', 'last_name' => 'Able'],
+        ['first_name' => 'Beta', 'last_name' => 'Baker'],
+      ],
+    ]);
+
+    $customValues = civicrm_api4('Custom_' . __FUNCTION__, 'save', [
+      'checkPermissions' => FALSE,
+      'records' => [
+        ['entity_id' => $contacts[0]['id'], 'Title' => 'Righto'],
+        ['entity_id' => $contacts[1]['id'], 'Title' => 'Wrongo'],
+      ],
+    ]);
+
+    $result = $this->runAutocomplete('Custom_' . __FUNCTION__, [
+      'input' => 'Right',
+    ]);
+
+    $this->assertCount(1, $result);
+    $this->assertEquals('Able, Alpha - Righto', $result[0]['label']);
+    $this->assertEquals('#' . $customValues[0]['id'], $result[0]['description'][0]);
+  }
+
+  public function testNoInfiniteLoopSearchDisplay(): void {
+    \Civi::dispatcher()->addListener('civi.api.prepare', [$this, '_modifySearchkitAutoComplete']);
+    $this->runAutocomplete('Contact', ['input' => '99999', 'fieldName' => '.autocomplete_My_Field_Name']);
+    \Civi::dispatcher()->removeListener('civi.api.prepare', [$this, '_modifySearchkitAutoComplete']);
+  }
+
+  public static function _modifySearchKitAutoComplete(PrepareEvent $event) {
+    $apiRequest = $event->getApiRequest();
+    if (!is_object($apiRequest) || !is_a($apiRequest, 'Civi\Api4\Generic\AutocompleteAction')) {
+      return;
+    }
+
+    if (
+        // APIv3 requests are not an object so check that first
+        is_object($apiRequest) &&
+        // We're only interested in Autocomplete actions
+        is_a($apiRequest, 'Civi\Api4\Generic\AutocompleteAction') &&
+        // Convention for fieldName is usually "entity:field" so e.g. "Participant:event_id"
+        $apiRequest->getFieldName() === '.autocomplete_My_Field_Name' &&
+        // Or for less specificity you could respond to all autocompletes for a particular entity
+        $apiRequest->getEntityName() === 'Contact'
+    ) {
+      $savedSearchC = [
+        'api_entity' => 'Contact',
+        'api_params' => [
+          'version' => 4,
+          'select' => [
+            'id',
+            'display_name',
+            'address_primary.postal_code',
+            'address_primary.city',
+          ],
+        ],
+      ];
+
+      $displayC = [
+        'settings' => [
+          'columns' => [
+            [
+              'type'    => 'field',
+              'key'     => 'display_name',
+              'rewrite' => '[id] -- [display_name] -- [address_primary.postal_code] [address_primary.city] ',
+            ],
+          ],
+        ],
+      ];
+
+      $apiRequest->overrideSavedSearch($savedSearchC);
+      $apiRequest->overrideDisplay($displayC);
+
+    }
+  }
+
+  public function testFormAutocompleteFilters(): void {
+    $lastName = uniqid(__FUNCTION__);
+    $contacts = $this->saveTestRecords('Contact', [
+      'records' => [
+        [
+          'first_name' => 'Include',
+          'last_name' => $lastName,
+          'legal_identifier' => 'include',
+        ],
+        [
+          'first_name' => 'Exclude',
+          'last_name' => $lastName,
+          'legal_identifier' => 'exclude',
+        ],
+        [
+          'first_name' => 'Null',
+          'last_name' => $lastName,
+          'legal_identifier' => NULL,
+        ],
+      ],
+    ]);
+
+    $result = Contact::autocomplete()
+      ->setInput($lastName)
+      ->setFieldName('Contact.some_field_name')
+      ->setFormName('qf:api\v4\Action\AutocompleteTestForm')
+      ->execute();
+
+    $this->assertCount(1, $result);
+    $this->assertEquals($lastName . ', Include', $result[0]['label']);
+    $this->assertEquals($contacts[0]['id'], $result[0]['id']);
+  }
+
+  public function testCustomFieldMultiValueAdvancedFilter(): void {
+    $lastName = uniqid(__FUNCTION__);
+    // All Individuals sharing a last name, so the name search matches all three equally -
+    // only the gender filter should decide which ones come back.
+    $contacts = $this->saveTestRecords('Contact', [
+      'records' => [
+        ['first_name' => 'IncludeMale', 'last_name' => $lastName, 'gender_id:name' => 'Male'],
+        ['first_name' => 'IncludeFemale', 'last_name' => $lastName, 'gender_id:name' => 'Female'],
+        ['first_name' => 'ExcludeOther', 'last_name' => $lastName, 'gender_id:name' => 'Other'],
+      ],
+    ]);
+
+    $customGroup = $this->createTestRecord('CustomGroup', [
+      'extends' => 'Activity',
+      'title' => __FUNCTION__,
+    ]);
+    $customField = $this->createTestRecord('CustomField', [
+      'custom_group_id' => $customGroup['id'],
+      'label' => 'contact_ref',
+      'data_type' => 'EntityReference',
+      'html_type' => 'Autocomplete-Select',
+      'fk_entity' => 'Contact',
+      // Multi-value "match any of these" filter, per the custom field's "Advanced Filter".
+      'filter' => 'gender_id:name=Male,Female',
+    ]);
+
+    $result = Contact::autocomplete()
+      ->setInput($lastName)
+      ->setFieldName('Activity.' . $customGroup['name'] . '.' . $customField['name'])
+      ->execute();
+
+    $this->assertEqualsCanonicalizing(
+      [$contacts[0]['id'], $contacts[1]['id']],
+      (array) $result->column('id')
+    );
+  }
+
+  public function testCustomFieldJsonWhereClauseAdvancedFilter(): void {
+    $lastName = uniqid(__FUNCTION__);
+    $contacts = $this->saveTestRecords('Contact', [
+      'records' => [
+        ['first_name' => 'Include', 'last_name' => $lastName, 'is_deceased' => FALSE],
+        ['first_name' => 'Exclude', 'last_name' => $lastName, 'is_deceased' => TRUE],
+      ],
+    ]);
+
+    $customGroup = $this->createTestRecord('CustomGroup', [
+      'extends' => 'Activity',
+      'title' => __FUNCTION__,
+    ]);
+    $customField = $this->createTestRecord('CustomField', [
+      'custom_group_id' => $customGroup['id'],
+      'label' => 'contact_ref',
+      'data_type' => 'EntityReference',
+      'html_type' => 'Autocomplete-Select',
+      'fk_entity' => 'Contact',
+      // A pasted-in `where` clause, for filters the flat field=value syntax can't express.
+      'filter' => '[["is_deceased", "=", false]]',
+    ]);
+
+    $result = Contact::autocomplete()
+      ->setInput($lastName)
+      ->setFieldName('Activity.' . $customGroup['name'] . '.' . $customField['name'])
+      ->execute();
+
+    $this->assertCount(1, $result);
+    $this->assertEquals($contacts[0]['id'], $result[0]['id']);
+  }
+
+}
+
+class AutocompleteTestForm extends \CRM_Core_Form {
+
+  public static function autocompleteFilters($mainEntityId = NULL): array {
+    return [
+      'some_field_name' => ['legal_identifier' => 'include'],
+    ];
   }
 
 }

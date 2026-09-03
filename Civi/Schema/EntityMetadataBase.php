@@ -107,11 +107,7 @@ abstract class EntityMetadataBase implements EntityMetadataInterface {
     // Set default selectors (allowing for overrides)
     $field['pseudoconstant'] += ['key_column' => 'value'];
 
-    // Guard against sql errors if this (relatively new) column hasn't been added yet by the upgrader
-    if (version_compare(\CRM_Core_BAO_Domain::version(), '5.49', '>')) {
-      $optionValueFieldsStr = \CRM_Core_DAO::getFieldValue('CRM_Core_DAO_OptionGroup', $groupId, 'option_value_fields');
-    }
-    $optionValueFields = empty($optionValueFieldsStr) ? ['name', 'label', 'description'] : explode(',', $optionValueFieldsStr);
+    $optionValueFields = \CRM_Core_BAO_OptionGroup::getOptionValueFields($groupName);
     foreach ($optionValueFields as $optionValueField) {
       $field['pseudoconstant'] += ["{$optionValueField}_column" => $optionValueField];
     }
@@ -161,12 +157,15 @@ abstract class EntityMetadataBase implements EntityMetadataInterface {
       if (isset($fields['is_active'])) {
         $select->select('`is_active`');
       }
+      if (isset($fields['is_reserved'])) {
+        $select->select('`is_reserved`');
+      }
       // Also component_id for filtering (this is legacy, the new way for extensions to add options is via hook)
       if (isset($fields['component_id'])) {
         $select->select('`component_id`');
       }
       // Order by: prefer order_column; or else 'weight' column; or else label_column; or as a last resort, $idCol
-      $orderColumns = [$pseudoconstant['order_column'] ?? NULL, 'weight', $pseudoconstant['label_column'] ?? NULL, $idCol];
+      $orderColumns = array_filter([$pseudoconstant['order_column'] ?? NULL, 'weight', $pseudoconstant['label_column'] ?? NULL, $idCol]);
       foreach ($orderColumns as $orderColumn) {
         if (isset($fields[$orderColumn])) {
           $select->orderBy($orderColumn);
@@ -237,6 +236,9 @@ abstract class EntityMetadataBase implements EntityMetadataInterface {
           'table_name' => $customGroup['table_name'],
           'column_name' => $customField['column_name'],
         ];
+        if ($customField['data_type'] === 'File') {
+          $field['input_attrs']['file_is_public'] = $customField['file_is_public'];
+        }
         if (empty($customField['is_view'])) {
           $field['usage'][] = 'import';
         }
@@ -262,18 +264,36 @@ abstract class EntityMetadataBase implements EntityMetadataInterface {
         }
         // Unserialize filters from url-arg-style string
         if (!empty($customField['filter'])) {
-          $customGroupFilters = explode('&', $customField['filter']);
-          foreach ($customGroupFilters as $filter) {
-            if (str_contains($filter, '=')) {
-              [$filterKey, $filterValue] = explode('=', $filter, 2);
-              // Convert legacy ContactRef filter to EntityRef format
-              if ($customField['data_type'] === 'ContactReference') {
-                $filterKey = $filterKey === 'group' ? 'groups' : $filterKey;
-                if ($filterKey === 'action') {
-                  continue;
-                }
+          $filter = $customField['filter'];
+          // Also accept a raw APIv4 `where` clause (e.g. copy/pasted from the API Explorer)
+          // for filters more complex than a flat list of `field=value` pairs.
+          if (str_starts_with($filter, '[')) {
+            $where = json_decode($filter, TRUE);
+            if (is_array($where)) {
+              // Accept either a full list of clauses (`[["field", "op", "value"], ...]`)
+              // or a single bare clause (`["field", "op", "value"]`) pasted on its own.
+              if (isset($where[0]) && !is_array($where[0])) {
+                $where = [$where];
               }
-              $field['input_attrs']['filter'][$filterKey] = $filterValue;
+              $field['input_attrs']['where'] = $where;
+            }
+          }
+          else {
+            $customGroupFilters = explode('&', $filter);
+            foreach ($customGroupFilters as $filterPart) {
+              if (str_contains($filterPart, '=')) {
+                [$filterKey, $filterValue] = explode('=', $filterPart, 2);
+                // Convert legacy ContactRef filter to EntityRef format
+                if ($customField['data_type'] === 'ContactReference') {
+                  $filterKey = $filterKey === 'group' ? 'groups' : $filterKey;
+                  if ($filterKey === 'action') {
+                    continue;
+                  }
+                }
+                // A comma-separated value means "match any of these" - pass as an array so the
+                // query builder can use IN/CONTAINS instead of a literal (and always-failing) match.
+                $field['input_attrs']['filter'][$filterKey] = str_contains($filterValue, ',') ? explode(',', $filterValue) : $filterValue;
+              }
             }
           }
         }
@@ -283,15 +303,28 @@ abstract class EntityMetadataBase implements EntityMetadataInterface {
           $addressField = \Civi::entity('Address')->getField($addressFieldName);
           $field['pseudoconstant'] = $addressField['pseudoconstant'];
         }
+        if ($customField['data_type'] === 'Currency') {
+          $field['pseudoconstant'] = [
+            'option_group_name' => 'currencies_enabled',
+          ];
+        }
         // Set FK for EntityRef, ContactRef & File fields
         $fkEntity = \CRM_Core_BAO_CustomField::getFkEntity($customField);
         if ($fkEntity) {
           $onDelete = empty($customField['fk_entity_on_delete']) ? 'SET NULL' : strtoupper(str_replace('_', ' ', $customField['fk_entity_on_delete']));
           $field['entity_reference'] = [
             'entity' => $fkEntity,
-            'key' => 'id',
+            'key' => $fkEntity === 'Currency' ? 'name' : 'id',
             'on_delete' => $onDelete,
           ];
+        }
+        // A custom placeholder (from `attributes`) reaches the legacy QuickForm widget for free
+        // (parsed generically at the top of addQuickFormElement()) - do the same here for APIv4/Afform.
+        if ($customField['data_type'] === 'EntityReference' && !empty($customField['attributes'])) {
+          $placeholder = \CRM_Core_BAO_CustomField::attributesFromString($customField['attributes'])['placeholder'] ?? NULL;
+          if ($placeholder) {
+            $field['input_attrs']['placeholder'] = $placeholder;
+          }
         }
         if ($customField['option_group_id']) {
           // Options for Select, Radio, Checkbox
@@ -308,6 +341,10 @@ abstract class EntityMetadataBase implements EntityMetadataInterface {
             // Retain option list but don't prefetch since the widget is autocomplete
             $field['pseudoconstant']['prefetch'] = 'disabled';
           }
+        }
+        // Control field
+        if (isset($customField['control_field'])) {
+          $field['input_attrs']['control_field'] = $customField['control_field'];
         }
         $customFields[$fieldName] = $field;
       }

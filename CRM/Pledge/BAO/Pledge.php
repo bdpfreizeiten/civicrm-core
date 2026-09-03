@@ -183,8 +183,7 @@ class CRM_Pledge_BAO_Pledge extends CRM_Pledge_DAO_Pledge {
       );
     }
 
-    $contributionTypes = CRM_Contribute_PseudoConstant::financialType();
-    $title = CRM_Contact_BAO_Contact::displayName($pledge->contact_id) . ' - (' . ts('Pledged') . ' ' . CRM_Utils_Money::format($pledge->amount, $pledge->currency) . ' - ' . ($contributionTypes[$pledge->financial_type_id] ?? '') . ')';
+    $title = CRM_Contact_BAO_Contact::displayName($pledge->contact_id) . ' - (' . ts('Pledged') . ' ' . CRM_Utils_Money::format($pledge->amount, $pledge->currency) . ' - ' . (string) CRM_Core_PseudoConstant::getLabel('CRM_Pledge_BAO_Pledge', 'financial_type_id', $pledge->financial_type_id) . ')';
 
     // add the recently created Pledge
     CRM_Utils_Recent::add($title,
@@ -535,7 +534,7 @@ GROUP BY  currency
     // handle custom data.
     $customGroup = [];
     if (!empty($params['hidden_custom'])) {
-      $groupTree = CRM_Core_BAO_CustomGroup::getTree('Pledge', NULL, $params['id']);
+      $groupTree = CRM_Core_BAO_CustomGroup::getAll(['extends' => 'Pledge', 'is_active' => TRUE, 'style' => 'Inline']);
       $pledgeParams = [['pledge_id', '=', $params['id'], 0, 0]];
       // retrieve custom data
       foreach ($groupTree as $groupID => $group) {

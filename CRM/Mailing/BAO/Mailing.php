@@ -18,8 +18,6 @@
 use Civi\API\Exception\UnauthorizedException;
 use Civi\Api4\MailingGroup;
 
-require_once 'Mail/mime.php';
-
 /**
  * Class CRM_Mailing_BAO_Mailing
  */
@@ -589,7 +587,9 @@ class CRM_Mailing_BAO_Mailing extends CRM_Mailing_DAO_Mailing implements \Civi\C
           $template[] = $this->footer->body_html;
         }
 
-        $this->templates['html'] = implode("\n", $template);
+        $this->templates['html'] = Civi::service('richtext')->filter('mailing',
+          implode("\n", $template)
+        );
 
         // this is where we create a text template from the html template if the text template did not exist
         // this way we ensure that every recipient will receive an email even if the pref is set to text and the
@@ -660,8 +660,11 @@ class CRM_Mailing_BAO_Mailing extends CRM_Mailing_DAO_Mailing implements \Civi\C
    *
    * @return array
    *   reference to an assoc array
+   *
+   * @deprecated since 6.18 will be removed around 6.28
    */
   public function &getFlattenedTokens() {
+    CRM_Core_Error::deprecatedFunctionWarning('token processor');
     if (!$this->flattenedTokens) {
       $tokens = $this->getTokens();
 
@@ -846,8 +849,8 @@ ORDER BY   civicrm_email.is_bulkmail DESC
   /**
    * Get verp, urls and headers
    *
-   * @param int $job_id
-   *   ID of the Job associated with this message.
+   * @param int|null $job_id
+   *   (deprecated) ID of the Job associated with this message.
    * @param int $event_queue_id
    *   ID of the EventQueue.
    * @param string $hash
@@ -977,9 +980,6 @@ ORDER BY   civicrm_email.is_bulkmail DESC
     if (!empty($params['check_permissions']) && CRM_Mailing_Info::workflowEnabled()) {
       $params = self::processWorkflowPermissions($params);
     }
-    if (!$id) {
-      $params['domain_id'] ??= CRM_Core_Config::domainID();
-    }
     if (
       ((!$id && empty($params['replyto_email'])) || !isset($params['replyto_email'])) &&
       isset($params['from_email'])
@@ -1061,7 +1061,7 @@ ORDER BY   civicrm_email.is_bulkmail DESC
         // load the default config settings for each
         // eg reply_id, unsubscribe_id need to use
         // correct template IDs here
-        'override_verp' => TRUE,
+        'override_verp' => !Civi::settings()->get('track_civimail_replies'),
         'forward_replies' => FALSE,
         'open_tracking' => Civi::settings()->get('open_tracking_default'),
         'url_tracking' => Civi::settings()->get('url_tracking_default'),
@@ -1144,9 +1144,6 @@ ORDER BY   civicrm_email.is_bulkmail DESC
       $mg->group_type = 'Include';
       $mg->save();
     }
-
-    // check and attach and files as needed
-    CRM_Core_BAO_File::processAttachment($params, 'civicrm_mailing', $mailing->id);
 
     $transaction->commit();
 
@@ -1712,18 +1709,15 @@ ORDER BY   civicrm_email.is_bulkmail DESC
 
     $mailingIDs = [];
 
-    // get all the groups that this user can access
-    // if they dont have universal access
-    $groupNames = civicrm_api3('Group', 'get', [
-      'check_permissions' => TRUE,
-      'return' => ['title', 'id'],
-      'options' => ['limit' => 0],
-    ]);
-    foreach ($groupNames['values'] as $group) {
-      $groups[$group['id']] = $group['title'];
-    }
-    if (!empty($groups)) {
-      $groupIDs = implode(',', array_keys($groups));
+    // get permissioned query clause
+    $groupBao = new CRM_Contact_BAO_Group();
+    $permissionClauses = $groupBao->addSelectWhereClause()['id'] ?? [];
+    // No need to run query if 0 groups are allowed
+    if (!in_array('IN (0)', $permissionClauses)) {
+      $permissionClause = '';
+      if ($permissionClauses) {
+        $permissionClause = 'AND g.entity_id ' . implode(' AND g.entity_id ', $permissionClauses);
+      }
       $domain_id = CRM_Core_Config::domainID();
 
       // get all the mailings that are in this subset of groups
@@ -1731,7 +1725,7 @@ ORDER BY   civicrm_email.is_bulkmail DESC
 SELECT    DISTINCT( m.id ) as id
   FROM    civicrm_mailing m
 LEFT JOIN civicrm_mailing_group g ON g.mailing_id   = m.id
- WHERE ( ( g.entity_table like 'civicrm_group%' AND g.entity_id IN ( $groupIDs ) )
+ WHERE ( ( g.entity_table like 'civicrm_group%' $permissionClause )
     OR   ( g.entity_table IS NULL AND g.entity_id IS NULL AND m.domain_id = $domain_id ) )
 ";
       $dao = CRM_Core_DAO::executeQuery($query);
@@ -1923,43 +1917,6 @@ LEFT JOIN civicrm_mailing_group g ON g.mailing_id   = m.id
   }
 
   /**
-   * @deprecated
-   *   This is used by CiviMail but will be made redundant by FlexMailer/TokenProcessor.
-   * @return array
-   */
-  public function getReturnProperties() {
-    $tokens = &$this->getTokens();
-    CRM_Core_Error::deprecatedWarning('function no longer called - use flexmailer');
-    $properties = [];
-    if (isset($tokens['html']) &&
-      isset($tokens['html']['contact'])
-    ) {
-      $properties = array_merge($properties, $tokens['html']['contact']);
-    }
-
-    if (isset($tokens['text']) &&
-      isset($tokens['text']['contact'])
-    ) {
-      $properties = array_merge($properties, $tokens['text']['contact']);
-    }
-
-    if (isset($tokens['subject']) &&
-      isset($tokens['subject']['contact'])
-    ) {
-      $properties = array_merge($properties, $tokens['subject']['contact']);
-    }
-
-    $returnProperties = [];
-    $returnProperties['display_name'] = $returnProperties['contact_id'] = $returnProperties['hash'] = 1;
-
-    foreach ($properties as $p) {
-      $returnProperties[$p] = 1;
-    }
-
-    return $returnProperties;
-  }
-
-  /**
    * Build the  compose mail form.
    *
    * @param CRM_Core_Form $form
@@ -1983,12 +1940,12 @@ LEFT JOIN civicrm_mailing_group g ON g.mailing_id   = m.id
       'text_message' => ts('HTML Format'),
       'sms_text_message' => ts('SMS Message'),
     ];
-    $modePrefixes = ['Mail' => NULL, 'SMS' => 'SMS'];
+    $modePrefixes = ['Mail' => '', 'SMS' => 'SMS'];
 
     $className = CRM_Utils_System::getClassName($form);
 
     if ($className != 'CRM_SMS_Form_Upload' && $className != 'CRM_Contact_Form_Task_SMS' &&
-      $className != 'CRM_Contact_Form_Task_SMS'
+      $className != 'CRM_Event_Form_Task_SMS'
     ) {
       $form->add('wysiwyg', 'html_message',
         strstr($className, 'PDF') ? ts('Document Body') : ts('HTML Format'),
@@ -2036,7 +1993,7 @@ LEFT JOIN civicrm_mailing_group g ON g.mailing_id   = m.id
 
         $form->add('select', "{$prefix}template", ts('Use Template'),
           ['' => ts('- select -')] + $templates[$prefix], FALSE,
-          ['onChange' => "selectValue( this.value, '{$prefix}');", 'class' => 'crm-select2 huge']
+          ['onChange' => "selectValue( this.value, '{$prefix}');", 'class' => 'crm-select2 huge', 'title' => ts('Use Template')]
         );
       }
       if (\CRM_Core_Permission::check('edit message templates')) {

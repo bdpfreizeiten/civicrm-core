@@ -139,6 +139,17 @@ class AutocompleteAction extends AbstractAction {
    */
   private $trustedFilters = [];
 
+  /**
+   * Raw `where` clauses set programmatically by `civi.api.prepare` listener. Automatically trusted.
+   *
+   * Unlike `$trustedFilters`, these support any where-clause syntax (operators, AND/OR groups, etc)
+   * instead of a flat fieldName => value match.
+   *
+   * Format: [[fieldName, op, value], ...]
+   * @var array
+   */
+  private $trustedWhere = [];
+
   private $trustedSavedSearch;
 
   private $trustedDisplay;
@@ -194,6 +205,9 @@ class AutocompleteAction extends AbstractAction {
       ]));
     }
     $this->loadSavedSearch();
+    if ($this->trustedWhere) {
+      $this->savedSearch['api_params']['where'] = array_merge($this->savedSearch['api_params']['where'], $this->trustedWhere);
+    }
     $this->loadSearchDisplay();
     $this->loadSearchFields();
 
@@ -281,6 +295,22 @@ class AutocompleteAction extends AbstractAction {
   }
 
   /**
+   * Method for `civi.api.prepare` listener to add a trusted, raw where-clause condition.
+   *
+   * Use this instead of `addFilter()` when the condition can't be expressed as a simple
+   * fieldName => value match, e.g. it uses an operator other than IN/=, or combines
+   * multiple fields in an AND/OR group.
+   *
+   * @param array $clause
+   *   A single APIv4 where-clause condition, e.g. `['case_type_id:name', 'IN', ['a', 'b']]`.
+   * @return $this
+   */
+  public function addWhere(array $clause) {
+    $this->trustedWhere[] = $clause;
+    return $this;
+  }
+
+  /**
    * Method for `civi.api.prepare` listener to override the savedSearch.
    *
    * @param string|array $savedSearch
@@ -359,6 +389,9 @@ class AutocompleteAction extends AbstractAction {
       }
       $this->searchFields = $searchFields;
     }
+
+    // ensure there is no duplicates
+    $this->searchFields = array_values(array_unique($this->searchFields));
 
     // Set searchField if not passed in
     $this->searchField = $this->searchField ?: $this->searchFields[0];

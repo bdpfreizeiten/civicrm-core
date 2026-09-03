@@ -135,14 +135,18 @@ class CRM_Utils_API_HTMLInputCoder extends CRM_Utils_API_AbstractFieldCoder {
         'password',
         'hashed_password',
         'password_reset_token',
+        // Mailing entity
+        'template_options',
+        // CaseType.definition
+        'definition',
       ];
-      $custom = CRM_Core_DAO::executeQuery('
-        SELECT cf.id, cf.name AS field_name, cg.name AS group_name
-        FROM civicrm_custom_field cf, civicrm_custom_group cg
-        WHERE cf.custom_group_id = cg.id AND cf.data_type = "Memo"');
-      while ($custom->fetch()) {
-        $this->skipFields[] = 'custom_' . $custom->id;
-        $this->skipFields[] = $custom->group_name . '.' . $custom->field_name;
+      foreach (CRM_Core_BAO_CustomGroup::getAll() as $customGroup) {
+        foreach ($customGroup['fields'] as $customField) {
+          if ($customField['data_type'] === 'Memo') {
+            $this->skipFields[] = 'custom_' . $customField['id'];
+            $this->skipFields[] = $customGroup['name'] . '.' . $customField['name'];
+          }
+        }
       }
     }
     return $this->skipFields;
@@ -245,6 +249,42 @@ class CRM_Utils_API_HTMLInputCoder extends CRM_Utils_API_AbstractFieldCoder {
         $row[$k] = $this->decodeValue($v);
       }
     }
+  }
+
+  /**
+   * Convert a raw database value to the desired format.
+   *
+   * @param string $field
+   *   Machine-name of the field.
+   *   Ex: 'title' or 'frontend_title'
+   * @param string|string[] $storedValue
+   *   Raw value(s) from the database.
+   * @param string $outputFormat
+   *   Preferred encoding of the value.
+   *   - 'plain' for plain text. (Ex: "Bill & Ted's >est Adventure")
+   *   - 'html' for HTML entities. (Ex: "Bill &amp; Ted's &gt;est Adventure")
+   *   - 'html-ish' for partial HTML entities (Ex: "Bill & Ted's &gt;est Adventure")
+   * @return string|string[]
+   * @throws \CRM_Core_Exception
+   */
+  public function transcode(string $field, $storedValue, string $outputFormat) {
+    if (is_array($storedValue)) {
+      return array_map(fn($t) => $this->transcode($field, $t, $outputFormat), $storedValue);
+    }
+    if ($storedValue === NULL) {
+      return $storedValue;
+    }
+
+    $storageFormat = $this->isSkippedField($field) ? 'plain' : 'html-ish';
+    return match($storageFormat . ' => ' . $outputFormat) {
+      "plain => plain" => $storedValue,
+      "plain => html-ish" => $this->encodeValue($storedValue),
+      "plain => html" =>  htmlentities($storedValue),
+      "html-ish => html-ish" => $storedValue,
+      "html-ish => plain" => $this->decodeValue($storedValue),
+      "html-ish => html" => htmlentities($this->decodeValue($storedValue)),
+      default => throw new \CRM_Core_Exception("Invalid transcode operation ($storageFormat => $outputFormat)")
+    };
   }
 
 }

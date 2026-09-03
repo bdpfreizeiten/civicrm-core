@@ -6,7 +6,7 @@ as "Contribution Pages").  This is a primary building-block for the [oEmbed](htt
 
 At time of writing, the extension is in an incubation period. It does not appear in the regular list of extensions.
 
-## Quick start
+## Installation
 
 * Enable the `iframe` extension.
 
@@ -15,17 +15,34 @@ At time of writing, the extension is in an incubation period. It does not appear
     cv en iframe
     ```
 
-* Install the entry-point script (`iframe.php`). There are three ways to do this:
+* On Drupal / Backdrop you must now install the entry-point script (`iframe.php`). There are three ways to do this:
     * __Web UI__: Open the "System Status". If you have permission, it will show a button "Deploy now".
     * __Manual__: Open the "System Status". It will show a button "Deploy instructions". Copy-paste the content into the target file.
     * __CLI/API__: Run `cv api4 Iframe.installScript`
 
-* Pick a CiviCRM page (eg `civicrm/contribute/transact?reset=1&id=1`). On an external website, you can make an HTML page which embeds the CiviCRM page:
+## Usage
+
+Pick a CiviCRM page (eg `civicrm/contribute/transact?reset=1&id=1`). On an external website, you can make an HTML page which embeds the CiviCRM page. The formation of the embed URL varies based on your CMS.
+
+* On Standalone, add `?iframe=1`:
     ```html
-    <IFRAME SRC="http://example.org/iframe.php/civicrm/contribute/transact?reset=1&id=1"/>
+    <iframe src="http://example.org/civicrm/contribute/transact?reset=1&id=1&iframe=1"></iframe>
     ```
 
-* Optionally, navigate to "Administer > System Settings > IFrame Connector Settings" to fine-tune the options.
+* On Wordpress, add `?_cvwpif=1`:
+    ```html
+    <iframe src="http://example.org/civicrm/contribute/transact?reset=1&id=1&_cvwpif=1"></iframe>
+    ```
+
+* On Drupal or Backdrop, add `iframe.php/` to the start of the path:
+
+    ```html
+    <iframe src="http://example.org/iframe.php/civicrm/contribute/transact?reset=1&id=1"></iframe>
+    ```
+
+## Configuration
+
+Navigate to "Administer > System Settings > IFrame Connector Settings" to fine-tune the options.
 
 ## Overview
 
@@ -84,9 +101,9 @@ TODO
     * [x] Rename existing stuff to `ext/iframe`
     * [ ] Add the real `ext/oembed` (https://oembed.com/#section4)
         * [ ] End-point for `civicrm/share/` which outputs an oEmbed stub
-    * [ ] IFRAME sizing: setting
+    * [ ] IFRAME sizing: setting ? still necessary now we have dynamic ?
         * Setting for default (maybe width=480? width=720? https://mediag.com/blog/popular-screen-resolutions-designing-for-all/)
-    * [ ] IFRAME sizing: customizable (`civicrm/share?size=NNNxNNN`)
+    * [ ] IFRAME sizing: customizable (`civicrm/share?size=NNNxNNN`) ? still necessary now we have dynamic ?
 * [ ] March 5.72-RC Addendum Extension
     * [ ] JS or CSS to hide elements that we don't want to deal with yet ("Tell a Friend", "Create PCP")
 * [ ] March 5.72-RC Testing
@@ -106,11 +123,11 @@ TODO
 * [ ] Important but not ASAP
     * [ ] Stricter JWT: https://lab.civicrm.org/dev/core/-/issues/2994#note_156045
         * If referrer doesn't match our iframe setup, then reset or reject the session id; probably includes test
-    * [ ] Add entry-point for UF=Standalone (boot; invoke; X-Frame-Options; etc)
-    * [ ] Add entry-point for UF=WordPress (script-file)
+    * [x] Add entry-point for UF=Standalone (boot; invoke; X-Frame-Options; etc)
+    * [x] Add entry-point for UF=WordPress (~~script-file~~ using hooks)
     * [ ] Add entry-point for UF=Backdrop
 * [ ] Wishlist (Budget guided)
-    * [ ] Add entry-point for UF=WordPress (wp-rest)
+    * [ ] Add entry-point for UF=WordPress (wp-rest) ?is this still needed?
     * [ ] Share Workflow: Public Links (templates/CRM/common/SocialNetwork.tpl; crmRegion or hook)
     * [ ] Share Workflow: Admin Links (Contribution Page, Event Page, Petition?)
     * [ ] Share Workflow: Page Default/Singular/Standard/Built-in
@@ -122,6 +139,6 @@ TODO
       - Add some JS that filters all hyperlinks within a certain area? (`CRM.$('thankyoupage a).addSessionId('xyz')`)
       - Add some alterContent to do the same as above? Or add a filter to the regeion?
       - Define an attr for `<A HREF= SESSION=1`> or `<A HREF= CLASS="crm-session">`. But interpret client-side or server-side?
-    * [ ] IFRAME sizing: dynamic
+    * [x] IFRAME sizing: dynamic
 * [ ] Wishlist (Long term)
     * [ ] Add entry-point for UF=Joomla

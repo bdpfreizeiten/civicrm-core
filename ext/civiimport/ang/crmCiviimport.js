@@ -7,10 +7,10 @@
       controller: function($scope, crmApi4, crmStatus, crmUiHelp) {
 
         // The ts() and hs() functions help load strings for this module.
-        var ts = $scope.ts = CRM.ts('civiimport');
-        var hs = $scope.hs = crmUiHelp({file: 'CRM/crmCiviimport/crmImportUi'});
+        const ts = $scope.ts = CRM.ts('civiimport');
+        const hs = $scope.hs = crmUiHelp({file: 'CRM/crmCiviimport/crmImportUi'});
         // Local variable for this controller (needed when inside a callback fn where `this` is not available).
-        var ctrl = this;
+        const ctrl = this;
 
         $scope.load = (function () {
           // The components of crmImportUi that we use are assigned individually for clarity - but
@@ -41,13 +41,13 @@
           $scope.data.entities = {};
           // Available entities is entityMetadata mapped to a form-friendly format
           $scope.entitySelection = [];
-          var entityConfiguration = $scope.userJob.metadata.entity_configuration;
+          const entityConfiguration = $scope.userJob.metadata.entity_configuration;
           _.each($scope.data.entityMetadata, function (entityMetadata) {
             var selected = (Boolean(entityConfiguration) && Boolean(entityConfiguration[entityMetadata.entity_name])) ? entityConfiguration[entityMetadata.entity_name] : entityMetadata.selected;
             // If our selected action is not available then fall back to the entity default.
             // This would happen if we went back to the DataSource screen & made a change, as the
             // php layer filters on that configuration options
-            var isActionValid = entityMetadata.actions.filter((function (action) {
+            const isActionValid = entityMetadata.actions.filter((function (action) {
               if (action.id === selected.action) {
                 return true;
               }
@@ -77,7 +77,7 @@
             $scope.data.importMappings = [];
             var importMappings = $scope.userJob.metadata.import_mappings;
             _.each($scope.data.columnHeaders, function (header, index) {
-              var fieldName = $scope.data.defaults['mapper[' + index + ']'][0];
+              let fieldName = $scope.data.defaults['mapper[' + index + ']'][0];
               if (Boolean(fieldName)) {
                 fieldName = fieldName.replace('__', '.');
               }
@@ -117,7 +117,7 @@
             // The $scope.data.entities has the selected data (but the fields are already filtered)
             var selected = $scope.data.entities[entity.entity_name].selected;
             if (selected.action !== 'ignore') {
-              availableEntity = _.clone(entity);
+              const availableEntity = _.clone(entity);
               availableEntity.children = filterEntityFields(entity.entity_type, entity.children, selected, entity.entity_name + '.');
               fields.push(availableEntity);
             }
@@ -233,7 +233,7 @@
          */
         $scope.addEntity = function (selectedEntity, selected) {
           if ($scope.data.entities[selectedEntity] === undefined) {
-            var entityData = $scope.getEntityMetadata(selectedEntity);
+            const entityData = $scope.getEntityMetadata(selectedEntity);
             entityData.selected = selected;
             if (entityData.id !== undefined) {
               $scope.data.entities[selectedEntity] = entityData;
@@ -248,7 +248,7 @@
          * @returns {*[]}
          */
         $scope.getEntityMetadata = function (selectedEntity) {
-          var entityData = {};
+          let entityData = {};
           _.each($scope.entitySelection, function (entityDetails) {
             if (entityDetails.id === selectedEntity) {
 
@@ -294,7 +294,7 @@
          * @type {$scope.getEntityForField}
          */
         $scope.getEntityForField = (function (fieldName) {
-          var entityName = '';
+          let entityName = '';
           _.each($scope.data.entityMetadata, function (fields) {
             _.each(fields.children, function (field) {
               if (field.id === fieldName) {
@@ -375,6 +375,11 @@
               'label' : $scope.userJob.label,
             };
             if ($scope.mappingSaving.newFieldMapping) {
+              if (!$scope.mappingSaving.newFieldMappingName) {
+                userJobs.push($scope.userJob);
+                $scope.saveJobs(userJobs);
+                return;
+              }
               templateJob.name = 'import_' + $scope.mappingSaving.newFieldMappingName;
               crmApi4('UserJob', 'get', {where: [['name', '=', templateJob.name]]})
                 .then(function(result) {

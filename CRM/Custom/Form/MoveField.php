@@ -81,7 +81,7 @@ class CRM_Custom_Form_MoveField extends CRM_Core_Form {
     ));
 
     $session = CRM_Core_Session::singleton();
-    $session->pushUserContext(CRM_Utils_System::url('civicrm/admin/custom/group/field', "reset=1&action=browse&gid={$this->_srcGID}"));
+    $session->pushUserContext(CRM_Utils_System::url("civicrm/admin/custom/group/fields#/?gid=$this->_srcGID"));
   }
 
   /**
@@ -141,7 +141,7 @@ class CRM_Custom_Form_MoveField extends CRM_Core_Form {
     $self->_dstGID = $fields['dst_group_id'];
     $tmp = CRM_Core_BAO_CustomField::_moveFieldValidate($self->_srcFID, $self->_dstGID);
     $errors = [];
-    if ($tmp['newGroupID']) {
+    if (!empty($tmp['newGroupID'])) {
       $errors['dst_group_id'] = $tmp['newGroupID'];
     }
     return empty($errors) ? TRUE : $errors;
@@ -159,7 +159,7 @@ class CRM_Custom_Form_MoveField extends CRM_Core_Form {
       $this->_dstGID,
       'title'
     );
-    $srcUrl = CRM_Utils_System::url('civicrm/admin/custom/group/field', "reset=1&action=browse&gid={$this->_dstGID}");
+    $srcUrl = CRM_Utils_System::url("civicrm/admin/custom/group/fields#/?gid=$this->_dstGID");
     CRM_Core_Session::setStatus(ts("%1 has been moved to the custom set <a href='%3'>%2</a>.",
       [
         1 => $this->_srcFieldLabel,

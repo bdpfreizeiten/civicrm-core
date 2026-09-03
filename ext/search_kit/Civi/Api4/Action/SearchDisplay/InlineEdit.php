@@ -96,7 +96,7 @@ class InlineEdit extends Run {
         }
         $tasks[$editableInfo['entity']][$taskKey]['record'][$editableInfo['value_key']] = $value;
       }
-      // Links column - check for matching apBatch tasks
+      // Links column - check for matching apiBatch tasks
       elseif (!empty($column['links']) || !empty($column['link'])) {
         $links = !empty($column['links']) ? $column['links'] : [$column['link']];
         foreach ($links as $link) {
@@ -209,7 +209,7 @@ class InlineEdit extends Run {
                 }
               }
             }
-            if (isset($key) && isset($value)) {
+            if (isset($key, $value)) {
               $editableItem['record'][$key] = $value;
             }
           }
@@ -236,6 +236,9 @@ class InlineEdit extends Run {
       throw new \CRM_Core_Exception('Cannot update draggable weight: no value provided.');
     }
     $entityName = $this->savedSearch['api_entity'];
+    if (!CoreUtil::isType($entityName, 'SortableEntity')) {
+      throw new \CRM_Core_Exception("Cannot drag-sort '$entityName': entity must declare itself a SortableEntity (see Civi\\Api4\\Generic\\Traits\\SortableEntity) for weights to be reordered correctly.");
+    }
     $keyName = CoreUtil::getIdFieldName($entityName);
     // For security, do not accept arbitrary values; only update weight.
     $values = [

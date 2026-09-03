@@ -31,6 +31,9 @@ trait AfformSaveTrait {
       $item['created_id'] = \CRM_Core_Session::getLoggedInContactID();
     }
 
+    // Dispatch hook_civicrm_pre
+    \CRM_Utils_Hook::pre($orig ? 'edit' : 'create', 'Afform', NULL, $item);
+
     // FIXME validate all field data.
     $item = _afform_fields_filter($item);
 
@@ -39,6 +42,13 @@ trait AfformSaveTrait {
       $layoutPath = $scanner->createSiteLocalPath($item['name'], 'aff.html');
       \CRM_Utils_File::createDir(dirname($layoutPath));
       $html = $this->convertInputToHtml($item['layout']);
+
+      $cycle = Utils::findEmbedCycle($item['name'], $html);
+      if ($cycle) {
+        throw new \CRM_Core_Exception(ts('A form cannot embed itself. This layout would form the loop: %1', [
+          1 => implode(' → ', $cycle),
+        ]));
+      }
 
       // Are we multilingual.
       if (\CRM_Core_I18n::isMultiLingual()) {
@@ -70,12 +80,20 @@ trait AfformSaveTrait {
     }
 
     if (Utils::shouldClearMenuCache($item, $orig ?? [])) {
-      \CRM_Core_Menu::store();
+      \CRM_Core_Menu::clear();
     }
 
     $item['module_name'] = _afform_angular_module_name($item['name'], 'camel');
     $item['directive_name'] = _afform_angular_module_name($item['name'], 'dash');
-    return $meta + $item;
+
+    $result = $meta + $item;
+
+    // Dispatch hook_civicrm_post
+    // param $object is passed by reference
+    $nullValue = NULL;
+    \CRM_Utils_Hook::post($orig ? 'edit' : 'create', 'Afform', 0, $nullValue, $result);
+
+    return $result;
   }
 
   /**

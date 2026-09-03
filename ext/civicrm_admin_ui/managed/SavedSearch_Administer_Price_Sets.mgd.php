@@ -2,53 +2,75 @@
 use CRM_CivicrmAdminUi_ExtensionUtil as E;
 
 return [
-  [
-    'name' => 'SavedSearch_Administer_Price_Sets',
-    'entity' => 'SavedSearch',
-    'cleanup' => 'unused',
-    'update' => 'unmodified',
-    'params' => [
-      'version' => 4,
-      'values' => [
-        'name' => 'Administer_Price_Sets',
-        'label' => E::ts('Price Sets'),
-        'api_entity' => 'PriceSet',
-        'api_params' => [
+      [
+        'name' => 'SavedSearch_Administer_Price_Sets',
+        'entity' => 'SavedSearch',
+        'cleanup' => 'unused',
+        'update' => 'unmodified',
+        'params' => [
           'version' => 4,
-          'select' => [
-            'id',
-            'title',
-            'extends:label',
-            'COUNT(PriceSet_PriceField_price_set_id_01.id) AS COUNT_PriceSet_PriceField_price_set_id_01_id',
-            'GROUP_CONCAT(DISTINCT PriceSet_PriceField_price_set_id_01.label) AS GROUP_CONCAT_PriceSet_PriceField_price_set_id_01_label',
-            'is_active',
-          ],
-          'groupBy' => ['id'],
-          'where' => [
-            ['is_reserved', '=', FALSE],
-            [
-              'is_quick_config',
-              '=',
-              FALSE,
-            ],
-          ],
-          'join' => [
-            [
-              'PriceField AS PriceSet_PriceField_price_set_id_01',
-              'LEFT',
-              [
+          'values' => [
+            'name' => 'Administer_Price_Sets',
+            'label' => E::ts('Price Sets'),
+            'api_entity' => 'PriceSet',
+            'api_params' => [
+              'version' => 4,
+              'select' => [
                 'id',
-                '=',
-                'PriceSet_PriceField_price_set_id_01.price_set_id',
+                'title',
+                'extends:label',
+                'COUNT(PriceSet_PriceField_price_set_id_01.id) AS COUNT_PriceSet_PriceField_price_set_id_01_id',
+                'GROUP_CONCAT(DISTINCT PriceSet_PriceField_price_set_id_01.label) AS GROUP_CONCAT_PriceSet_PriceField_price_set_id_01_label',
+                'is_active',
               ],
+              'groupBy' => [
+                'id',
+              ],
+              'where' => [
+                [
+                  'is_reserved',
+                  '=',
+                  FALSE,
+                ],
+                [
+                  'is_quick_config',
+                  '=',
+                  FALSE,
+                ],
+                [
+                  'OR',
+                  [
+                    [
+                      'domain_id:name',
+                      '=',
+                      'current_domain',
+                    ],
+                    [
+                      'domain_id:name',
+                      'IS NULL',
+                    ],
+                  ],
+                ],
+              ],
+              'join' => [
+                [
+                  'PriceField AS PriceSet_PriceField_price_set_id_01',
+                  'LEFT',
+                  [
+                    'id',
+                    '=',
+                    'PriceSet_PriceField_price_set_id_01.price_set_id',
+                  ],
+                ],
+              ],
+              'having' => [],
             ],
           ],
-          'having' => [],
+          'match' => [
+            'name',
+          ],
         ],
       ],
-      'match' => ['name'],
-    ],
-  ],
   [
     'name' => 'SavedSearch_Administer_Price_Sets_SearchDisplay_Administer_Price_Sets',
     'entity' => 'SearchDisplay',
@@ -75,20 +97,20 @@ return [
             [
               'type' => 'field',
               'key' => 'title',
-              'label' => E::ts('Title'),
+              'label' => 'Title',
               'sortable' => TRUE,
               'editable' => TRUE,
             ],
             [
               'type' => 'field',
               'key' => 'extends:label',
-              'label' => E::ts('Used For'),
+              'label' => 'Used For',
               'sortable' => TRUE,
             ],
             [
               'type' => 'html',
               'key' => 'GROUP_CONCAT_PriceSet_PriceField_price_set_id_01_label',
-              'label' => E::ts('Fields'),
+              'label' => 'Fields',
               'sortable' => TRUE,
               'rewrite' => '{capture assign=fields}[GROUP_CONCAT_PriceSet_PriceField_price_set_id_01_label]{/capture}{$fields|replace:\',\':\'<br>\'}',
             ],
@@ -124,7 +146,7 @@ return [
                   'join' => '',
                   'target' => 'crm-popup',
                   'icon' => 'fa-pencil',
-                  'text' => E::ts('Settings'),
+                  'text' => 'Settings',
                   'style' => 'default',
                   'path' => '',
                   'task' => '',
@@ -136,7 +158,7 @@ return [
                   'join' => '',
                   'target' => 'crm-popup',
                   'icon' => 'fa-eye',
-                  'text' => E::ts('Preview'),
+                  'text' => 'Preview',
                   'style' => 'default',
                   'path' => '',
                   'task' => '',
@@ -148,7 +170,7 @@ return [
                   'join' => '',
                   'target' => 'crm-popup',
                   'icon' => 'fa-toggle-on',
-                  'text' => E::ts('Enable'),
+                  'text' => 'Enable',
                   'style' => 'default',
                   'path' => '',
                   'action' => '',
@@ -162,7 +184,7 @@ return [
                   'join' => '',
                   'target' => 'crm-popup',
                   'icon' => 'fa-toggle-off',
-                  'text' => E::ts('Disable'),
+                  'text' => 'Disable',
                   'style' => 'default',
                   'path' => '',
                   'action' => '',
@@ -176,7 +198,7 @@ return [
                   'join' => '',
                   'target' => 'crm-popup',
                   'icon' => 'fa-trash',
-                  'text' => E::ts('Delete'),
+                  'text' => 'Delete',
                   'style' => 'danger',
                   'path' => '',
                   'task' => '',
@@ -188,7 +210,7 @@ return [
                   'csrf' => 'qfKey',
                   'join' => '',
                   'icon' => 'fa-copy',
-                  'text' => E::ts('Copy'),
+                  'text' => 'Copy',
                   'style' => 'default',
                   'path' => '',
                   'task' => '',
@@ -206,7 +228,7 @@ return [
               'action' => 'add',
               'target' => 'crm-popup',
               'style' => 'primary',
-              'text' => E::ts('Add Price Set'),
+              'text' => 'Add Price Set',
               'icon' => 'fa-plus',
               'autoOpen' => TRUE,
               'path' => '',

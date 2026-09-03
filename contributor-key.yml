@@ -80,6 +80,8 @@
 - name        : Alex Lee
   organization: GMCVO Databases
 
+- github      : alexandreSymbiotic
+
 - github      : alexmarketaccess
   name        : Alex Block
 
@@ -116,6 +118,9 @@
 - github      : angusfretwell
   name        : Angus Fretwell
   organization: Buildkite
+
+- github      : antoinetielbeke
+  name        : Antoine
 
 - github      : AnwenW
   name        : Anwen Williams
@@ -175,6 +180,10 @@
 
 - github      : artem3
   name        : Artem Goncharenko
+
+- github      : ArthegaAsdweri
+  name        : Daniel Hahn
+  organization: SYSTOPIA
 
 - github      : arthuralmeidap
   name        : Arthur Almeida
@@ -253,9 +262,15 @@
 - github      : borisson
   name        : Joris Vercammen
 
+- github      : boskabouter007
+  name        : Paul Van Leemput
+
 - github      : braders
   name        : Bradley Taylor
   organization: BrightMinded Ltd
+
+- github      : brendt
+  name        : Brent Roose
 
 - name        : Brian McFee
 
@@ -269,11 +284,7 @@
   organization: Non Profit Tech Advisor
 
 - github      : briennek
-  organization: Civil Justice, Inc.
   name        : Brienne K.
-
-- github      : briennekordis
-  name        : Brienne Kordis
   organization: Megaphone Technology Consulting
 
 - github      : brucew2013
@@ -293,6 +304,10 @@
 - github      : cdhassell
 
 - name        : Cath O'Connell
+
+- github      : celinenicolas
+  name        : Celine Nicolas
+  organization: JMA Consulting
 
 - github      : chagrawil
   name        : Charlie Wilder
@@ -375,11 +390,16 @@
   name        : César Ramos
   organization: iXiam
 
+- github      : cwerstuik
+  name        : Curtis Werstuik
+
 - github      : chrisfromredfin
   name        : Chris Wells
   organization: Redfin Solutions
 
 - name        : Andy Clarke
+
+- github      : davemoreton
 
 - github      : dbwells
   name        : Dan Wells
@@ -465,6 +485,8 @@
 - github      : Dawnthorn
   name        : Peter Haight
   organization: Giant Rabbit
+
+- github      : dbw2bit
 
 - github      : djnatedagreat
   name        : Nate Frank
@@ -552,7 +574,7 @@
 
 - github      : elisseck
   name        : Eli Lisseck
-  organization: AGH Strategies
+  organization: Giant Rabbit
 
 - github      : elinw
 
@@ -833,6 +855,10 @@
 - github      : jeromelebleu
   name        : Jérôme Lebleu
 
+- github      : jfilter
+  name        : Johannes Filter
+  organization: civico GmbH
+
 - github      : JGaunt
   name        : Jade Gaunt
   organization: GMCVO Databases
@@ -868,6 +894,9 @@
 - github      : johntwyman
   name        : John Twyman
   organization: Australian Greens
+
+- github      : jonathandhn
+  name        : Jonathan Dahan
 
 - github      : jorich-2000
   name        : Jonathan Richardson
@@ -1061,6 +1090,8 @@
   organization: National Urban League
 
 - github      : lucky091588
+
+- github      : lukasfelixkraft
 
 - github      : lunar-debian
 
@@ -1474,6 +1505,9 @@
 - github      : RexAK
   name        : Rex Keal
 
+- github      : RyanMorash
+  name        : Ryan Morash
+
 - name        : Lutz Frommberger
 
 - github      : RhiCircle
@@ -1484,6 +1518,9 @@
   name        : Robert Gilman
   organization: Context Institute
 
+- github      : RisingOrange
+  name        : Jakub Fidler
+
 - github      : robbrandt
   name        : Rob Brandt
   organization: Botanical Society of America
@@ -1493,6 +1530,9 @@
 
 - github      : robfenwickuk
   name        : Robin Fenwick
+
+- github      : robinbowes
+  name        : Robin Bowes
 
 - name        : Robert Lang
 
@@ -1654,6 +1694,8 @@
   name        : Sunil Pawar
   organization: Skvare
 
+- github      : sushant-cividesk
+
 - github      : swastikpareek
   name        : Swastik Pareek
   organization: QED42
@@ -1707,6 +1749,10 @@
 
 - github      : tapashdatta
 
+- github      : tarunnjoshi
+  organization: Colored Cow
+  name        : Tarun Joshi
+
 - github      : tbember
   name        : Tiago Bember
   organization: Giant Rabbit
@@ -1759,6 +1805,10 @@
   name        : Timotheus Pokorra
   organization: Hostsharing eG
 
+
+- github      : tresero
+  name        : Jon Griffin
+
 - github      : triprems
   name        : William Rems
   organization: University of Hawaii at Manoa - Center on Disability Studies
@@ -1804,6 +1854,9 @@
   name        : Usha F. Matisson
   organization: Makoa
 
+- github      : ustramooner
+  name        : Ben van Klinken
+
 - name        : Vakees K
 
 - github      : valfr35
@@ -1841,6 +1894,10 @@
 - github      : vingle
   name        : Nicol Wistreich
 
+- github      : volkjohn
+  name        : John Volk
+  organization: Youth Apostles Institute
+
 - github      : waddyvic
   name        : Victor Huang
 
@@ -1873,7 +1930,7 @@
 
 - github      : wintermoor
   name        : Torben Bertram
-  organization: ECOPLAN
+  organization: civiservice.de GmbH
 
 - github      : wmortada
   name        : William Mortada
@@ -1979,3 +2036,18 @@
 - github      : MundMBo
   name        : Marvin Müller
 
+- github      : PassionateBytes
+  name        : Paul Bütof
+  organization: Passionate Bytes Solutions
+
+- github      : kernie
+  name        : Maarten Becker
+  organization: Ingenieurbüro Dr. Maarten Becker
+
+- github      : yf-zhou
+  name        : Yifei Zhou
+  organization: JMA Consulting
+
+- github      : yorkshirerose
+  name        : Rose
+  organization: Ruza Solutions

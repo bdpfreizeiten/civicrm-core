@@ -132,7 +132,7 @@ trait FormTrait {
    * @param int $count
    */
   protected function assertMailSentCount(int $count): void {
-    $this->assertCount($count, $this->form->getMail());
+    $this->assertCount($count, (array) $this->form->getMail());
   }
 
   /**
@@ -150,6 +150,29 @@ trait FormTrait {
 
   protected function assertTemplateVariable($name, $expected): void {
     $this->assertEquals($expected, $this->form->getTemplateVariable($name));
+  }
+
+  protected function getTemplateVariable($name): mixed {
+    return $this->form->getTemplateVariable($name);
+  }
+
+  protected function getQFKey(): string {
+    return $this->form->getQFKey();
+  }
+
+  /**
+   * Gets a value saved to the form using `set()`.
+   *
+   * Generally this function is best avoided in favour of
+   * outputs / actions. But for some embedded search forms...
+   * it's hard to see how to do that.
+   *
+   * @param string $name
+   *
+   * @return mixed
+   */
+  protected function getValueSetOnForm($name): mixed {
+    return $this->form->getValueSetOnForm($name);
   }
 
   /**

@@ -4,7 +4,10 @@
   angular.module('crmSearchAdmin').component('crmSearchFunction', {
     bindings: {
       mode: '@',
-      expr: '='
+      expr: '=',
+      apiEntity: '<',
+      apiParams: '<',
+      hideLabel: '<'
     },
     require: {
       crmSearchAdmin: '^crmSearchAdmin'
@@ -14,10 +17,30 @@
       const ts = $scope.ts = CRM.ts('org.civicrm.search_kit');
       const ctrl = this;
 
+      Object.defineProperty(this, 'savedSearch', {
+        get: () => ({
+          api_entity: this.apiEntity,
+          api_params: this.apiParams
+        })
+      });
+
+      const canAggregate = (col) => {
+        const entityInfo = searchMeta.getEntity(this.savedSearch.api_entity);
+        if (!entityInfo?.params?.includes('groupBy')) {
+          return false;
+        }
+        // If the query does not use grouping, it's always allowed
+        if (!this.savedSearch.api_params.groupBy || !this.savedSearch.api_params.groupBy.length) {
+          return true;
+        }
+        return this.crmSearchAdmin.mustAggregate(col, this.savedSearch);
+      };
+
       const allTypes = {
         aggregate: ts('Aggregate'),
         comparison: ts('Comparison'),
-        date: ts('Date'),
+        date: ts('Date Calculation'),
+        partial_date: ts('Partial Date'),
         math: ts('Math'),
         string: ts('Text')
       };
@@ -32,8 +55,8 @@
       this.exprTypesByName = this.sqlExprTypes.reduce((acc, item) => (acc[item.name] = item, acc), {});
 
       this.$onInit = function() {
-        const info = searchMeta.parseExpr(ctrl.expr);
-        ctrl.fieldArg = _.findWhere(info.args, {type: 'field'});
+        const info = searchMeta.parseExpr(ctrl.expr, ctrl.savedSearch);
+        ctrl.fieldArg = info.args.find(arg => arg.type === 'field');
         ctrl.args = info.args;
         ctrl.fn = info.fn;
         ctrl.fnName = !info.fn ? '' : info.fn.name;
@@ -42,7 +65,7 @@
 
       // Watch if field is switched
       $scope.$watch('$ctrl.expr', function(newExpr, oldExpr) {
-        if (oldExpr && newExpr && newExpr.indexOf('(') < 0) {
+        if (oldExpr && newExpr && !newExpr.includes('(')) {
           ctrl.$onInit();
         }
       });
@@ -113,13 +136,13 @@
           functions = [];
         if (ctrl.expr && ctrl.fieldArg) {
           // Field in select clause that can be aggregated
-          if (ctrl.mode !== 'groupBy' && ctrl.crmSearchAdmin.canAggregate(ctrl.expr)) {
+          if (ctrl.mode !== 'groupBy' && canAggregate(ctrl.expr)) {
             allowedTypes.push('aggregate');
             // In addition to aggregate functions, also permit a function used in the groupBy clause
-            (ctrl.crmSearchAdmin.savedSearch.api_params.groupBy || []).forEach(function(fieldStr) {
+            (ctrl.savedSearch.api_params.groupBy || []).forEach(function(fieldStr) {
               if (fieldStr.includes(ctrl.fieldArg.field.name) && fieldStr.includes('(')) {
-                let fieldExpr = searchMeta.parseExpr(fieldStr);
-                let field = _.findWhere(fieldExpr.args, {type: 'field'});
+                let fieldExpr = searchMeta.parseExpr(fieldStr, ctrl.savedSearch);
+                let field = fieldExpr.args.find((arg) => arg.type === 'field');
                 if (fieldExpr.fn && fieldExpr.fn.name !== 'e' && field && field.field.name === ctrl.fieldArg.field.name) {
                   functions.push({
                     text: allTypes[fieldExpr.fn.category],
@@ -130,19 +153,17 @@
             });
           }
           // Field in groupBy clause or field in select clause that isn't required to be aggregated
-          if (ctrl.mode === 'groupBy' || !ctrl.crmSearchAdmin.mustAggregate(ctrl.expr)) {
+          if (ctrl.mode === 'groupBy' || !ctrl.crmSearchAdmin.mustAggregate(ctrl.expr, ctrl.savedSearch)) {
             allowedTypes.push('comparison', 'string');
-            if (_.includes(['Integer', 'Float', 'Date', 'Timestamp', 'Money'], ctrl.fieldArg.field.data_type)) {
+            if (['Integer', 'Float', 'Date', 'Timestamp', 'Money'].includes(ctrl.fieldArg.field.data_type)) {
               allowedTypes.push('math');
             }
-            if (_.includes(['Date', 'Timestamp'], ctrl.fieldArg.field.data_type)) {
-              allowedTypes.push('date');
+            if (['Date', 'Timestamp'].includes(ctrl.fieldArg.field.data_type)) {
+              allowedTypes.push('date', 'partial_date');
             }
           }
-          _.each(allowedTypes, function(type) {
-            const allowedFunctions = _.filter(CRM.crmSearchAdmin.functions, function(fn) {
-              return fn.category === type && fn.params.length;
-            });
+          allowedTypes.forEach(type => {
+            const allowedFunctions = CRM.crmSearchAdmin.functions.filter(fn => fn.category === type && fn.params.length);
             functions.push({
               text: allTypes[type],
               children: formatForSelect2(allowedFunctions, 'name', 'title', ['description'])
@@ -154,12 +175,12 @@
 
       this.getFields = function() {
         return {
-          results: ctrl.crmSearchAdmin.getAllFields(':label', ['Field', 'Custom', 'Extra'])
+          results: ctrl.crmSearchAdmin.getAllFields(ctrl.savedSearch, ':label', ['Field', 'Custom', 'Extra'])
         };
       };
 
       this.selectFunction = function() {
-        ctrl.fn = _.find(CRM.crmSearchAdmin.functions, {name: ctrl.fnName});
+        ctrl.fn = CRM.crmSearchAdmin.functions.find(fn => fn.name === ctrl.fnName);
         ctrl.args = [ctrl.fieldArg];
         if (ctrl.fn) {
           let exprType,
@@ -200,19 +221,30 @@
         ctrl.writeExpr();
       };
 
-      // Make a sql-friendly alias for this expression
+      // Make a sql-friendly alias for this expression, using the same
+      // truncate-and-hash formula as the SQL column names it may become.
       function makeAlias() {
         const args = ctrl.args
-          .filter(arg => arg.value && (arg.type === 'field' || arg.type === 'number'))
-          .map(arg => arg.value);
-        return (ctrl.fnName + '_' + args.join('_')).replace(/[.:]/g, '_');
+          .filter(arg => arg.value && (arg.type === 'field' || arg.type === 'number' || arg.type === 'string'))
+          .map(arg => String(arg.value));
+        // Replace the pseudoconstant separator, which createSqlName would strip
+        const alias = (ctrl.fnName + '_' + args.join('_')).replace(/:/g, '_');
+        return searchMeta.createSqlName(alias);
       }
 
       this.writeExpr = function() {
         if (ctrl.fnName) {
           const args = ctrl.args.map((arg, index) => {
             const value = arg.value === undefined ? '' : arg.value;
-            const prefix = arg.name ? (index ? ' ' : '') + (arg.name) + (value === '' ? '' : ' ') : (index ? ', ' : '');
+            let prefix = '';
+            // Named arguments are separated by a space, unnamed ones are separated by a comma
+            if (arg.name) {
+              prefix = (index ? ' ' : '') + (arg.name) + (value === '' ? '' : ' ');
+            } else if (index && ctrl.fnName === 'e') {
+              prefix = ' ';
+            } else if (index) {
+              prefix = ', ';
+            }
             const flag = arg.flag_before ? arg.flag_before + ' ' : '';
             const suffix = arg.flag_after ? ' ' + arg.flag_after : '';
             let content = '';

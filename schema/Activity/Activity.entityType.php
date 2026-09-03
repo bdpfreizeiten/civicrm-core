@@ -4,6 +4,7 @@ return [
   'name' => 'Activity',
   'table' => 'civicrm_activity',
   'class' => 'CRM_Activity_DAO_Activity',
+  'token_class' => 'CRM_Activity_Tokens',
   'getInfo' => fn() => [
     'title' => ts('Activity'),
     'title_plural' => ts('Activities'),
@@ -44,12 +45,6 @@ return [
       ],
       'add' => '4.7',
     ],
-    'index_is_current_revision' => [
-      'fields' => [
-        'is_current_revision' => TRUE,
-      ],
-      'add' => '2.2',
-    ],
     'index_is_deleted' => [
       'fields' => [
         'is_deleted' => TRUE,
@@ -70,6 +65,7 @@ return [
         'import',
         'export',
         'duplicate_matching',
+        'token',
       ],
       'primary_key' => TRUE,
       'auto_increment' => TRUE,
@@ -87,7 +83,7 @@ return [
       'sql_type' => 'int unsigned',
       'input_type' => 'Select',
       'required' => TRUE,
-      'description' => ts('FK to civicrm_option_value.id, that has to be valid, registered activity type.'),
+      'description' => ts('FK to civicrm_option_value.value, that has to be valid, registered activity type.'),
       'add' => '1.1',
       'default' => 1,
       'usage' => [
@@ -162,7 +158,7 @@ return [
       'sql_type' => 'int unsigned',
       'input_type' => 'EntityRef',
       'deprecated' => TRUE,
-      'description' => ts('Phone ID of the number called (optional - used if an existing phone number is selected).'),
+      'description' => ts('Unused deprecated column.'),
       'add' => '2.0',
       'input_attrs' => [
         'label' => ts('Phone (called)'),
@@ -178,7 +174,7 @@ return [
       'sql_type' => 'varchar(64)',
       'input_type' => 'Text',
       'deprecated' => TRUE,
-      'description' => ts('Phone number in case the number does not exist in the civicrm_phone table.'),
+      'description' => ts('Unused deprecated column.'),
       'add' => '2.0',
     ],
     'details' => [
@@ -284,7 +280,7 @@ return [
       'sql_type' => 'int unsigned',
       'input_type' => 'EntityRef',
       'deprecated' => TRUE,
-      'description' => ts('FK to Relationship ID'),
+      'description' => ts('Unused deprecated column.'),
       'add' => '2.2',
       'default' => NULL,
       'input_attrs' => [

@@ -31,36 +31,7 @@
  * with reference to `$template =& CRM_Core_Smarty::singleton();`
  */
 
-/**
- * Get the path to load Smarty.
- *
- * @return string|null
- */
-function crm_smarty_compatibility_get_path() {
-  $path = CRM_Utils_Constant::value('CIVICRM_SMARTY_AUTOLOAD_PATH') ?: CRM_Utils_Constant::value('CIVICRM_SMARTY3_AUTOLOAD_PATH');
-  if ($path) {
-    $path = str_replace('smarty3', 'smarty4', $path);
-  }
-  else {
-    $path = \Civi::paths()->getPath('[civicrm.packages]/smarty5/Smarty.php');
-  }
-  return $path;
-}
-
-/**
- * Fix for bug CRM-392. Not sure if this is the best fix or it will impact
- * other similar PEAR packages. doubt it
- */
-if (!class_exists('Smarty')) {
-  $path = crm_smarty_compatibility_get_path();
-  if ($path) {
-    // Specify the smarty version to load.
-    require_once $path;
-  }
-  else {
-    require_once 'Smarty/Smarty.class.php';
-  }
-}
+use Civi\Smarty;
 
 /**
  *

@@ -146,15 +146,13 @@ class CRM_Contact_Form_Search_Custom_FullText extends CRM_Contact_Form_Search_Cu
   }
 
   public function initialize() {
-    static $initialized = FALSE;
-
-    if (!$initialized) {
-      $initialized = TRUE;
-
-      $this->buildTempTable();
-
-      $this->fillTable();
+    if (isset(\Civi::$statics[__CLASS__][__FUNCTION__]['initialized'])) {
+      return;
     }
+
+    \Civi::$statics[__CLASS__][__FUNCTION__]['initialized'] = TRUE;
+    $this->buildTempTable();
+    $this->fillTable();
   }
 
   public function buildTempTable(): void {
@@ -382,11 +380,10 @@ WHERE      t.table_name = 'Activity' AND
     while ($dao->fetch()) {
       $row = [];
       foreach ($this->_tableFields as $name => $dontCare) {
-        if ($name !== 'activity_type_id') {
-          $row[$name] = $dao->$name;
-        }
-        else {
+        $row[$name] = $dao->$name;
+        if ($name === 'activity_type_id') {
           $row['activity_type'] = CRM_Core_PseudoConstant::getLabel('CRM_Activity_BAO_Activity', 'activity_type_id', $dao->$name);
+
         }
       }
       if (isset($row['participant_role'])) {

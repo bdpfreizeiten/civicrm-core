@@ -84,11 +84,18 @@ class CRM_Custom_Form_Group extends CRM_Admin_Form {
       $errors['title'] = ts('Custom group \'%1\' already exists in Database.', [1 => $title]);
     }
 
-    if (empty($fields['is_multiple']) && $fields['style'] == 'Tab with table') {
+    if ($self->_isGroupEmpty && empty($fields['is_multiple']) && $fields['style'] == 'Tab with table') {
       $errors['style'] = ts("Display Style 'Tab with table' is only supported for multiple-record custom field sets.");
     }
 
-    //checks the given custom set doesnot start with digit
+    if (!empty($fields['extends_entity_column_id']) && empty($fields['extends_entity_column_value'])) {
+      $options = array_column(CRM_Core_BAO_CustomGroup::getExtendsEntityColumnIdOptions(NULL, $fields), 'label', 'id');
+      if (isset($options[$fields['extends_entity_column_id']])) {
+        $errors['extends_entity_column_value'] = ts("Please select at least one %1.", [1 => $options[$fields['extends_entity_column_id']]]);
+      }
+    }
+
+    // Checks the given custom set does not start with digit
     $title = $fields['title'];
     if (!empty($title)) {
       // gives the ascii value
@@ -184,8 +191,8 @@ class CRM_Custom_Form_Group extends CRM_Admin_Form {
     $this->add('select2', 'extends_entity_column_value', ts('Sub Type'), $initialEntityColumnValueOptions, FALSE, ['multiple' => TRUE, 'placeholder' => ts('Any')]);
 
     // help text
-    $this->add('wysiwyg', 'help_pre', ts('Pre-form Help'), $attributes['help_pre']);
-    $this->add('wysiwyg', 'help_post', ts('Post-form Help'), $attributes['help_post']);
+    $this->add('wysiwyg', 'help_pre', ts('Pre-form Help'), ['class' => 'collapsed']);
+    $this->add('wysiwyg', 'help_post', ts('Post-form Help'), ['class' => 'collapsed']);
 
     // weight
     $this->add('number', 'weight', ts('Order'), $attributes['weight'], TRUE);
@@ -219,7 +226,7 @@ class CRM_Custom_Form_Group extends CRM_Admin_Form {
     if (!$this->_isGroupEmpty) {
       $this->getElement('extends')->freeze();
       $this->getElement('extends_entity_column_id')->freeze();
-      $this->getElement('is_multiple')->freeze();
+      $this->getElement('is_multiple')->setAttribute('disabled', 'disabled');
       // Don't allow max to be lowered if data already exists
       $this->getElement('max_multiple')->setAttribute('min', $this->_values['max_multiple'] ?? '0');
     }
@@ -247,12 +254,15 @@ class CRM_Custom_Form_Group extends CRM_Admin_Form {
    * @return array
    */
   public function setDefaultValues(): array {
-    $defaults = &$this->_values;
+    $defaults = parent::setDefaultValues();
     if ($this->_action == CRM_Core_Action::ADD) {
-      $defaults['weight'] = CRM_Utils_Weight::getDefaultWeight('CRM_Core_DAO_CustomGroup');
-
-      $defaults['is_active'] = $defaults['is_public'] = $defaults['collapse_adv_display'] = 1;
-      $defaults['style'] = 'Inline';
+      $defaults += [
+        'weight' => CRM_Utils_Weight::getDefaultWeight('CRM_Core_DAO_CustomGroup'),
+        'is_active' => 1,
+        'is_public' => 1,
+        'collapse_adv_display' => 1,
+        'style' => 'Inline',
+      ];
     }
     return $defaults;
   }
@@ -267,7 +277,10 @@ class CRM_Custom_Form_Group extends CRM_Admin_Form {
       // Because select2
       $params['extends_entity_column_value'] = explode(',', $params['extends_entity_column_value']);
     }
-    $params['overrideFKConstraint'] = 0;
+    // Don't submit value from disabled form control
+    if (!$this->_isGroupEmpty) {
+      unset($params['is_multiple']);
+    }
     if ($this->_action & CRM_Core_Action::UPDATE) {
       $params['id'] = $this->_id;
       if ($this->_values['extends'] != $params['extends']) {
@@ -284,12 +297,6 @@ class CRM_Custom_Form_Group extends CRM_Admin_Form {
         CRM_Contact_BAO_ContactType::deleteCustomRowsOfSubtype($this->_id, $subtypesToBeRemoved, $subtypesToPreserve);
       }
     }
-    elseif ($this->_action & CRM_Core_Action::ADD) {
-      //new custom set , so lets set the created_id
-      $session = CRM_Core_Session::singleton();
-      $params['created_id'] = $session->get('userID');
-      $params['created_date'] = date('YmdHis');
-    }
 
     $result = civicrm_api3('CustomGroup', 'create', $params);
     $group = $result['values'][$result['id']];
@@ -304,14 +311,12 @@ class CRM_Custom_Form_Group extends CRM_Admin_Form {
       CRM_Core_Session::setStatus(ts('Your custom field set \'%1 \' has been saved.', [1 => $group['title']]), ts('Saved'), 'success');
     }
     else {
-      // Jump directly to adding a field if popups are disabled
-      $action = CRM_Core_Resources::singleton()->ajaxPopupsEnabled ? '' : '/add';
-      $url = CRM_Utils_System::url("civicrm/admin/custom/group/field$action", 'reset=1&new=1&gid=' . $group['id']);
+      // Redirect to search display of fields
+      $url = Civi::url('civicrm/admin/custom/group/fields#/?gid=' . $group['id']);
       CRM_Core_Session::setStatus(ts("Your custom field set '%1' has been added. You can add custom fields now.",
         [1 => $group['title']]
       ), ts('Saved'), 'success');
-      $session = CRM_Core_Session::singleton();
-      $session->replaceUserContext($url);
+      CRM_Core_Session::singleton()->replaceUserContext((string) $url);
     }
 
     // prompt Drupal Views users to update $db_prefix in settings.php, if necessary

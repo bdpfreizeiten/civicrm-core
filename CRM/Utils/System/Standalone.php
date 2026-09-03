@@ -108,13 +108,22 @@ class CRM_Utils_System_Standalone extends CRM_Utils_System_Base {
   public function createUser(&$params, $emailParam) {
     try {
       $email = $params[$emailParam];
+      $contactId = $params['contactID'] ?? $params['contact_id'] ?? NULL;
+      $userParams = [
+        'username' => $params['cms_name'],
+        'uf_name' => $email,
+        'contact_id' => $contactId,
+      ];
+      if (!empty($params['cms_pass'])) {
+        $userParams['password'] = $params['cms_pass'];
+      }
       $userID = \Civi\Api4\User::create(FALSE)
-        ->addValue('username', $params['cms_name'])
-        ->addValue('uf_name', $email)
-        ->addValue('password', $params['cms_pass'])
-        ->addValue('contact_id', $params['contact_id'] ?? NULL)
-        // ->addValue('uf_id', 0) // does not work without this.
+        ->setValues($userParams)
         ->execute()->single()['id'];
+
+      if ($params['notify'] ?? TRUE) {
+        $this->sendUserRegistrationEmail($userID);
+      }
     }
     catch (\Exception $e) {
       \Civi::log()->warning("Failed to create user '$email': " . $e->getMessage());
@@ -125,6 +134,63 @@ class CRM_Utils_System_Standalone extends CRM_Utils_System_Base {
   }
 
   /**
+   * Send a welcome / registration email to a newly created user with a password reset link.
+   *
+   * @param int $userID
+   * @param int $tokenTimeout Token validity in minutes (default 24 hours).
+   * @return bool
+   */
+  public function sendUserRegistrationEmail(int $userID, int $tokenTimeout = 1440): bool {
+    if (!$this->isUserExtensionAvailable()) {
+      return FALSE;
+    }
+
+    $user = \Civi\Api4\User::get(FALSE)
+      ->addWhere('id', '=', $userID)
+      ->addSelect('id', 'username', 'uf_name', 'contact_id')
+      ->execute()->first();
+
+    if (!$user || !filter_var($user['uf_name'] ?? '', \FILTER_VALIDATE_EMAIL)) {
+      \Civi::log()->warning("Cannot send registration email: user not found or invalid email.", ['userId' => $userID]);
+      return FALSE;
+    }
+
+    // Check for message template
+    $tplID = \Civi\Api4\MessageTemplate::get(FALSE)
+      ->setSelect(['id'])
+      ->addWhere('workflow_name', '=', 'user_registration')
+      ->addWhere('is_default', '=', TRUE)
+      ->addWhere('is_reserved', '=', FALSE)
+      ->addWhere('is_active', '=', TRUE)
+      ->execute()->first()['id'] ?? NULL;
+
+    if (!$tplID) {
+      \Civi::log()->notice("No active default user_registration message template found for user {username}", ['username' => $user['username']]);
+      return FALSE;
+    }
+
+    $token = \Civi\Api4\Action\User\PasswordReset::updateToken($user['id'], $tokenTimeout);
+
+    [$domainFromName, $domainFromEmail] = \CRM_Core_BAO_Domain::getNameAndEmail(TRUE);
+    try {
+      $workflowMessage = (new \CRM_Standaloneusers_WorkflowMessage_UserRegistration())
+        ->setRequiredParams($user['username'], $user['uf_name'], (int) $user['contact_id'], $token, $tokenTimeout)
+        ->setFrom("\"$domainFromName\" <$domainFromEmail>");
+
+      [$sent] = $workflowMessage->sendTemplate();
+      if ($sent) {
+        \Civi::log()->info("Successfully sent user registration email to user {$user['id']} ({$user['username']}) at {$user['uf_name']}");
+        return TRUE;
+      }
+    }
+    catch (\Exception $e) {
+      \Civi::log()->error("Failed to send user registration email to user {$user['id']}: " . $e->getMessage());
+    }
+
+    return FALSE;
+  }
+
+  /**
    * @inheritDoc
    */
   public function updateCMSName($ufID, $email) {
@@ -132,6 +198,40 @@ class CRM_Utils_System_Standalone extends CRM_Utils_System_Base {
       ->addWhere('id', '=', $ufID)
       ->addValue('uf_name', $email)
       ->execute();
+  }
+
+  /**
+   * @inheritDoc
+   */
+  public function checkUserNameEmailExists(&$params, &$errors, $emailName = 'email') {
+    if (!$this->isUserExtensionAvailable()) {
+      return;
+    }
+
+    if (!empty($params['name'])) {
+      $user = \Civi\Api4\User::get(FALSE)
+        ->addSelect('id')
+        ->addWhere('username', '=', $params['name'])
+        ->execute()
+        ->first();
+      if ($user) {
+        $errors['cms_name'] = ts('The username %1 is already taken. Please select another username.', [1 => $params['name']]);
+      }
+    }
+
+    if (!empty($params['mail'])) {
+      $user = \Civi\Api4\User::get(FALSE)
+        ->addSelect('id')
+        ->addWhere('uf_name', '=', $params['mail'])
+        ->execute()
+        ->first();
+      if ($user) {
+        $resetUrl = CRM_Utils_System::url('civicrm/login/password', '', TRUE);
+        $errors[$emailName] = ts('The email address %1 already has an account associated with it. <a href="%2">Have you forgotten your password?</a>',
+          [1 => $params['mail'], 2 => $resetUrl]
+        );
+      }
+    }
   }
 
   /**
@@ -267,7 +367,7 @@ class CRM_Utils_System_Standalone extends CRM_Utils_System_Base {
   public static function currentPath() {
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
 
-    return $path ? trim($path, '/') : NULL;
+    return $path ? trim(urldecode($path), '/') : NULL;
   }
 
   /**
@@ -502,16 +602,14 @@ class CRM_Utils_System_Standalone extends CRM_Utils_System_Base {
    * @inheritDoc
    */
   public function isUserRegistrationPermitted() {
-    // We don't support user registration in Standalone.
-    return FALSE;
+    return (bool) Civi::settings()->get('standaloneusers_allow_public_registration');
   }
 
   /**
    * @inheritDoc
    */
   public function isPasswordUserGenerated() {
-    // @todo User management not implemented, but we should do like on WP
-    // and always generate a password for the user, as part of the login process.
+    // We always generate a password for new users and then email them a password reset link.
     return FALSE;
   }
 
@@ -581,7 +679,8 @@ class CRM_Utils_System_Standalone extends CRM_Utils_System_Base {
         return $user['timezone'];
       }
     }
-    return date_default_timezone_get();
+    // Global fallback if no timezone specified at user level
+    return Civi::settings()->get('standalone_timezone_default') ?? date_default_timezone_get();
   }
 
   /**
@@ -652,41 +751,55 @@ class CRM_Utils_System_Standalone extends CRM_Utils_System_Base {
 
   /**
    * Start a new session.
-   *
-   * Generally this uses the SessionHander provided by Standaloneusers
-   * extension - but we fallback to a default PHP session to:
-   * a) allow the installer to work (early in the Standalone install, we dont have Standaloneusers yet)
-   * b) avoid unhelpfully hard crash if the ExtensionSystem goes down (without the fallback, the crash
-   * here swallows whatever error is actually causing the crash)
    */
   public function sessionStart() {
-    if (!$this->isUserExtensionAvailable()) {
-      $session_cookie_name = 'SESSCIVISOFALLBACK';
-    }
-    else {
-      $session_cookie_name = 'SESSCIVISO';
+    $this->setSessionHandler();
+    session_start($this->getSessionStartParams());
+  }
 
-      if (ini_get('session.save_handler') === 'redis') {
-        // We'll just use the default, take no action.
-      }
-      else {
-        $session_handler = new SessionHandler();
-        session_set_save_handler($session_handler);
-      }
+  /**
+   * Generally we use the SessionHander provided by Standaloneusers extension,
+   * except:
+   * - in less bootstrapped situations (install, errors) we fallback to a default PHP session
+   * - if using redis session handler, leave well alone
+   */
+  protected function setSessionHandler(): void {
+    if (!$this->isUserExtensionAvailable()) {
+      return;
     }
+    if (ini_get('session.save_handler') === 'redis') {
+      return;
+    }
+    $session_handler = new SessionHandler();
+    session_set_save_handler($session_handler);
+  }
+
+  protected function getSessionStartParams() {
+    $sessionCookieName = ($this->isUserExtensionAvailable()) ? 'SESSCIVISO' : 'SESSCIVISOFALLBACK';
 
     // session lifetime in seconds (default = 24 minutes)
-    $session_max_lifetime = (Civi::settings()->get('standaloneusers_session_max_lifetime') ?? 24) * 60;
+    $sessionLifetime = (Civi::settings()->get('standaloneusers_session_max_lifetime') ?? 24) * 60;
 
-    session_start([
+    $params = [
       'cookie_httponly'  => 1,
       'cookie_secure'    => !empty($_SERVER['HTTPS']),
-      'gc_maxlifetime'   => $session_max_lifetime,
-      'name'             => $session_cookie_name,
+      'gc_maxlifetime'   => $sessionLifetime,
+      'name'             => $sessionCookieName,
       'use_cookies'      => 1,
       'use_only_cookies' => 1,
       'use_strict_mode'  => 1,
-    ]);
+    ];
+
+    // tweaks when in iframe mode
+    if (defined('CIVICRM_IFRAME') && CIVICRM_IFRAME) {
+      $params['name'] .= 'IFRAME';
+
+      if (!empty($_SERVER['HTTPS'])) {
+        $params['cookie_samesite'] = 'None';
+      }
+    }
+
+    return $params;
   }
 
   public function initialize() {
@@ -722,6 +835,14 @@ class CRM_Utils_System_Standalone extends CRM_Utils_System_Base {
   }
 
   /**
+   * @inheritdoc
+   */
+  public function theme($content, $print = FALSE, $maintenance = FALSE): void {
+    \Civi\Standalone\ErrorHandler::renderErrors($content);
+    parent::theme($content, $print, $maintenance);
+  }
+
+  /**
    * Standalone's session cannot be initialized until CiviCRM is booted,
    * since it is defined in an extension,
    *
@@ -731,6 +852,73 @@ class CRM_Utils_System_Standalone extends CRM_Utils_System_Base {
   public function postContainerBoot(): void {
     $sess = \CRM_Core_Session::singleton();
     $sess->initialize();
+  }
+
+  public function getRoleNames(): array {
+    return \Civi\Api4\Role::get(FALSE)
+      ->addSelect('name', 'label')
+      ->addWhere('is_active', '=', TRUE)
+      ->addOrderBy('label')
+      ->execute()
+      ->column('label', 'name');
+  }
+
+  /**
+   * @inheritDoc
+   */
+  public function addUfRole(int $ufID, string $role): bool {
+    if (!$this->isUserExtensionAvailable() || !$this->getUserById($ufID)) {
+      return FALSE;
+    }
+    $roleID = $this->getUfRoleId($role);
+    if (!$roleID) {
+      return FALSE;
+    }
+    $exists = \Civi\Api4\UserRole::get(FALSE)
+      ->addWhere('user_id', '=', $ufID)
+      ->addWhere('role_id', '=', $roleID)
+      ->selectRowCount()
+      ->execute()->count();
+    if (!$exists) {
+      \Civi\Api4\UserRole::create(FALSE)
+        ->addValue('user_id', $ufID)
+        ->addValue('role_id', $roleID)
+        ->execute();
+    }
+    return TRUE;
+  }
+
+  /**
+   * @inheritDoc
+   */
+  public function removeUfRole(int $ufID, string $role): bool {
+    if (!$this->isUserExtensionAvailable() || !$this->getUserById($ufID)) {
+      return FALSE;
+    }
+    $roleID = $this->getUfRoleId($role);
+    if (!$roleID) {
+      return FALSE;
+    }
+    \Civi\Api4\UserRole::delete(FALSE)
+      ->addWhere('user_id', '=', $ufID)
+      ->addWhere('role_id', '=', $roleID)
+      ->execute();
+    return TRUE;
+  }
+
+  /**
+   * Look up a Standalone role id by its name.
+   *
+   * @param string $role
+   *
+   * @return int|null
+   */
+  private function getUfRoleId($role): ?int {
+    return \Civi\Api4\Role::get(FALSE)
+      ->addSelect('id')
+      ->addWhere('name', '=', $role)
+      ->addWhere('is_active', '=', TRUE)
+      ->execute()->first()['id'] ?? NULL;
   }
 
 }

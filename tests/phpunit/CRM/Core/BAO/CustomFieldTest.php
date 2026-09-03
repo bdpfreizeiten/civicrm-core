@@ -47,8 +47,13 @@ class CRM_Core_BAO_CustomFieldTest extends CiviUnitTestCase {
     $this->assertEquals(strtolower("{$dbFieldName}_{$customFieldID}"), $dbColumnName,
       "Column name ends in ID");
 
+    // Test getShortNameFromLongName and getLongNameFromShortName functions.
     $this->assertSame('new_custom_group.testFld', CRM_Core_BAO_CustomField::getLongNameFromShortName("custom_{$customFieldID}_123"));
     $this->assertSame("custom_$customFieldID", CRM_Core_BAO_CustomField::getShortNameFromLongName('new_custom_group.testFld'));
+    $this->assertNull(CRM_Core_BAO_CustomField::getShortNameFromLongName('new_custom_group.nothing'));
+    $this->assertNull(CRM_Core_BAO_CustomField::getShortNameFromLongName('nothing.here'));
+    $this->assertNull(CRM_Core_BAO_CustomField::getLongNameFromShortName("abc_$customFieldID"));
+    $this->assertNull(CRM_Core_BAO_CustomField::getLongNameFromShortName('custom_1234567890'));
 
     $this->assertEquals('testFld', CRM_Core_BAO_CustomField::getField($customFieldID)['name']);
     $this->assertEquals($customFieldID, CRM_Core_BAO_CustomField::getFieldByName('new_custom_group.testFld')['id']);
@@ -234,6 +239,20 @@ class CRM_Core_BAO_CustomFieldTest extends CiviUnitTestCase {
           '10 USD' => '10.00',
           '10.1 USD' => '10.10',
           '10.99 USD' => '10.99',
+        ],
+      ],
+      [
+        'data_type' => 'String',
+        'html_type' => 'Autocomplete-Select',
+        'serialize' => 1,
+        'option_values' => [
+          '1' => 'Hello',
+          '2' => 'hey',
+          '3' => 'Testing',
+        ],
+        'tests' => [
+          'Hello' => '1',
+          'Hello, hey' => '1,2',
         ],
       ],
     ];
@@ -985,6 +1004,44 @@ class CRM_Core_BAO_CustomFieldTest extends CiviUnitTestCase {
 
         ],
       ],
+      $this->getCustomFieldName('float') => [
+        'name' => $this->getCustomFieldName('float'),
+        'custom_field_id' => $this->getCustomFieldID('float'),
+        'id' => $this->getCustomFieldID('float'),
+        'groupTitle' => 'Custom Group',
+        'default_value' => NULL,
+        'option_group_id' => $this->getOptionGroupID('float'),
+        'custom_group_id' => $customGroupID,
+        'extends' => 'Contact',
+        'extends_entity_column_value' => NULL,
+        'extends_entity_column_id' => '',
+        'is_view' => '0',
+        'is_multiple' => '0',
+        'date_format' => NULL,
+        'time_format' => NULL,
+        'is_required' => 0,
+        'table_name' => 'civicrm_value_custom_group_' . $customGroupID,
+        'column_name' => $this->getCustomFieldColumnName('float'),
+        'where' => 'civicrm_value_custom_group_' . $customGroupID . '.' . $this->getCustomFieldColumnName('float'),
+        'extends_table' => 'civicrm_contact',
+        'search_table' => 'contact_a',
+        'import' => 1,
+        'label' => 'Number select',
+        'headerPattern' => '//',
+        'title' => 'Number select',
+        'data_type' => 'Float',
+        'type' => 512,
+        'html_type' => 'Select',
+        'text_length' => NULL,
+        'options_per_line' => NULL,
+        'is_search_range' => 0,
+        'serialize' => '0',
+        'pseudoconstant' => [
+          'optionGroupName' => $this->getOptionGroupName('float'),
+          'optionEditPath' => 'civicrm/admin/options/' . $this->getOptionGroupName('float'),
+
+        ],
+      ],
     ];
     $this->assertEquals($expected, CRM_Core_BAO_CustomField::getFieldsForImport());
   }
@@ -997,7 +1054,7 @@ class CRM_Core_BAO_CustomFieldTest extends CiviUnitTestCase {
       'extends' => 'Individual',
       'title' => 'my bulk group',
     ]);
-    CustomField::save(FALSE)->setRecords([
+    $customFields = CustomField::save(FALSE)->setRecords([
       [
         'label' => 'Test',
         'data_type' => 'String',
@@ -1015,13 +1072,18 @@ class CRM_Core_BAO_CustomFieldTest extends CiviUnitTestCase {
       'custom_group_id' => $customGroup['id'],
       'is_active' => 1,
       'is_searchable' => 1,
-    ])->execute();
+    ])->execute()->indexBy('label');
+    $this->assertCount(2, $customFields);
+
+    $testLink = $customFields['test_link']['column_name'];
+    $this->assertEquals('test_link_' . $customFields['test_link']['id'], $testLink);
+
     $dao = CRM_Core_DAO::executeQuery(('SHOW CREATE TABLE ' . $customGroup['values'][$customGroup['id']]['table_name']));
     $dao->fetch();
     $collation = \CRM_Core_BAO_SchemaHandler::getInUseCollation();
-    $this->assertStringContainsString('`test_link_2` varchar(2047) COLLATE ' . $collation . ' DEFAULT NULL', $dao->Create_Table);
+    $this->assertStringContainsString("`$testLink` varchar(2047) COLLATE $collation DEFAULT NULL", $dao->Create_Table);
     $this->assertStringContainsString('KEY `index_my_text` (`my_text`)', $dao->Create_Table);
-    $this->assertStringContainsString('KEY `index_test_link_2` (`test_link_2`(512))', $dao->Create_Table);
+    $this->assertStringContainsString("KEY `index_$testLink` (`$testLink`(512))", $dao->Create_Table);
     $characterSet = stripos($collation, 'utf8mb4') !== FALSE ? 'utf8mb4' : 'utf8';
     $this->assertStringContainsString("ENGINE=InnoDB DEFAULT CHARSET={$characterSet} COLLATE={$collation}", $dao->Create_Table);
   }
@@ -1041,9 +1103,8 @@ class CRM_Core_BAO_CustomFieldTest extends CiviUnitTestCase {
       'html_type' => 'File',
       'default_value' => '',
     ]);
-    $filePath = Civi::paths()->getPath('[civicrm.files]/custom/test_file.txt');
     $file = $this->callAPISuccess('File', 'create', [
-      'uri' => $filePath,
+      'uri' => 'test_file.txt',
     ]);
     $this->individualCreate(['custom_' . $fileField['id'] => $file['id']]);
     $expectedDisplayValue = CRM_Core_BAO_File::paperIconAttachment('*', $file['id'])[$file['id']];
@@ -1137,6 +1198,49 @@ class CRM_Core_BAO_CustomFieldTest extends CiviUnitTestCase {
       'return' => 'custom_' . $fieldId,
     ]);
     $this->assertEquals(array_keys($colors), $value);
+  }
+
+  /**
+   * @dataProvider attributesStringDataProvider
+   */
+  public function testAttributesFromStringRoundTrip(string $attrString, array $expected): void {
+    $parsed = CRM_Core_BAO_CustomField::attributesFromString($attrString);
+    $this->assertEquals($expected, $parsed);
+    // Re-encoding then re-parsing should be lossless, even for values containing spaces/quotes.
+    $reparsed = CRM_Core_BAO_CustomField::attributesFromString(CRM_Core_BAO_CustomField::attributesToString($parsed));
+    $this->assertEquals($parsed, $reparsed);
+  }
+
+  public static function attributesStringDataProvider(): array {
+    return [
+      'unquoted, single word' => ['rows=3 cols=40', ['rows' => '3', 'cols' => '40']],
+      'unquoted, no spaces needed' => ['placeholder=Select', ['placeholder' => 'Select']],
+      'double-quoted value with a space' => ['placeholder="Find sites"', ['placeholder' => 'Find sites']],
+      'single-quoted value with a space' => ["placeholder='Find sites'", ['placeholder' => 'Find sites']],
+      'mixed quoted and unquoted' => ['a=1 b="two words" c=3', ['a' => '1', 'b' => 'two words', 'c' => '3']],
+      'empty string' => ['', []],
+    ];
+  }
+
+  /**
+   * A placeholder set via `attributes` (e.g. `placeholder="Find sites"`) should reach the
+   * rendered form element for an EntityReference field exactly as entered, overriding the
+   * auto-generated "- select X -" default.
+   */
+  public function testEntityReferencePlaceholderFromAttributes(): void {
+    $customGroupId = $this->customGroupCreate(['extends' => 'Individual'])['id'];
+    $field = CustomField::create(FALSE)
+      ->addValue('custom_group_id', $customGroupId)
+      ->addValue('label', 'entity_ref_placeholder')
+      ->addValue('data_type', 'EntityReference')
+      ->addValue('html_type', 'Autocomplete-Select')
+      ->addValue('fk_entity', 'Activity')
+      ->addValue('attributes', 'placeholder="Find sites"')
+      ->execute()->single();
+
+    $form = new CRM_Core_Form();
+    $element = CRM_Core_BAO_CustomField::addQuickFormElement($form, 'custom_' . $field['id'], $field['id']);
+    $this->assertEquals('Find sites', $element->getAttribute('placeholder'));
   }
 
 }

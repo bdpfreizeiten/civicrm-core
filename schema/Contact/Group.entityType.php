@@ -4,6 +4,7 @@ return [
   'name' => 'Group',
   'table' => 'civicrm_group',
   'class' => 'CRM_Contact_DAO_Group',
+  'token_class' => 'CRM_Core_GroupTokens',
   'getInfo' => fn() => [
     'title' => ts('Group'),
     'title_plural' => ts('Groups'),
@@ -58,6 +59,9 @@ return [
       'add' => '1.1',
       'primary_key' => TRUE,
       'auto_increment' => TRUE,
+      'usage' => [
+        'token',
+      ],
     ],
     'name' => [
       'title' => ts('Group Name'),
@@ -139,7 +143,7 @@ return [
       'input_type' => NULL,
       'deprecated' => TRUE,
       'readonly' => TRUE,
-      'description' => ts('the sql where clause if a saved search acl'),
+      'description' => ts('Unused deprecated column.'),
       'add' => '1.6',
     ],
     'select_tables' => [
@@ -148,7 +152,7 @@ return [
       'input_type' => NULL,
       'deprecated' => TRUE,
       'readonly' => TRUE,
-      'description' => ts('the tables to be included in a select data'),
+      'description' => ts('Unused deprecated column.'),
       'add' => '1.6',
       'serialize' => CRM_Core_DAO::SERIALIZE_PHP,
     ],
@@ -158,7 +162,7 @@ return [
       'input_type' => NULL,
       'deprecated' => TRUE,
       'readonly' => TRUE,
-      'description' => ts('the tables to be included in the count statement'),
+      'description' => ts('Unused deprecated column.'),
       'add' => '1.6',
       'serialize' => CRM_Core_DAO::SERIALIZE_PHP,
     ],

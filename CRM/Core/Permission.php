@@ -138,7 +138,13 @@ class CRM_Core_Permission {
         // This is an individual permission
         $impliedPermissions = self::getImpliedBy($permission);
         foreach ($impliedPermissions as $permissionOption) {
-          $granted = CRM_Core_Config::singleton()->userPermissionClass->check($permissionOption, $userId);
+          if (str_starts_with($permissionOption, 'has user role ')) {
+            $roleName = substr($permissionOption, 14);
+            $granted = self::checkGroupRole([$roleName]);
+          }
+          else {
+            $granted = CRM_Core_Config::singleton()->userPermissionClass->check($permissionOption, $userId);
+          }
           // Call the permission_check hook to permit dynamic escalation (CRM-19256)
           CRM_Utils_Hook::permission_check($permissionOption, $granted, $contactId);
           if ($granted) {
@@ -225,14 +231,18 @@ class CRM_Core_Permission {
    *   Type of group(Access/Mailing).
    * @param bool $excludeHidden
    *   exclude hidden groups.
-   *
-   *
+   * @param string $textFormat
+   *   One of: 'plain', 'html', 'html-ish'
    * @return array
    *   array reference of all groups.
    */
-  public static function group($groupType, $excludeHidden = TRUE) {
+  public static function group($groupType, $excludeHidden = TRUE, string $textFormat = 'html-ish') {
     $config = CRM_Core_Config::singleton();
-    return $config->userPermissionClass->group($groupType, $excludeHidden);
+    $groups = $config->userPermissionClass->group($groupType, $excludeHidden);
+    // You might think that this could return different formats on different UFs.
+    // But no -- there is only one base implementation of `group()`, and it reads
+    // the "title" fields.
+    return CRM_Utils_API_HTMLInputCoder::singleton()->transcode('title', $groups, $textFormat);
   }
 
   /**
@@ -1016,6 +1026,10 @@ class CRM_Core_Permission {
       // Also '@afform - see AfformUsageTest.
       return [$permissionName];
     }
+    // User roles contain no implied permissions
+    if (str_starts_with($permissionName, 'has user role ')) {
+      return [$permissionName];
+    }
     try {
       $permission = self::basicPermissions(TRUE, TRUE)[$permissionName] ?? NULL;
       $impliedPermissions = array_merge([$permissionName], $permission['implied_by'] ?? []);
@@ -1199,8 +1213,8 @@ class CRM_Core_Permission {
         'administer CiviCase',
       ],
       'default' => [
-        // At minimum the user needs one of the following. Finer-grained access is controlled by CRM_Case_BAO_Case::addSelectWhereClause
-        ['access my cases and activities', 'access all cases and activities'],
+        // At minimum the user needs the following. Finer-grained access is controlled by CRM_Case_BAO_Case::addSelectWhereClause
+        'access my cases and activities',
       ],
     ];
     $permissions['case_contact'] = $permissions['case'];
@@ -1208,10 +1222,7 @@ class CRM_Core_Permission {
 
     $permissions['case_type'] = [
       'default' => ['administer CiviCase'],
-      'get' => [
-        // nested array = OR
-        ['access my cases and activities', 'access all cases and activities'],
-      ],
+      'get' => ['access my cases and activities'],
     ];
 
     // Campaign permissions
@@ -1286,6 +1297,7 @@ class CRM_Core_Permission {
       ],
     ];
     $permissions['contribution_recur'] = $permissions['payment'];
+    $permissions['order'] = $permissions['payment'];
 
     // Custom field permissions
     $permissions['custom_field'] = [
@@ -1541,6 +1553,15 @@ class CRM_Core_Permission {
         'edit event participants',
         'access CiviContribute',
         'edit contributions',
+      ],
+    ];
+    $permissions['participant_status_type'] = [
+      'get' => [
+        ['access CiviCRM', 'access CiviEvent', 'view event participants'],
+      ],
+      'default' => [
+        'administer CiviCRM data',
+        'access CiviEvent',
       ],
     ];
 
@@ -1808,10 +1829,12 @@ class CRM_Core_Permission {
    *
    * @return string
    *   a comma separated list of email addresses
+   *
+   * @deprecated since 6.18 will be removed around 6.28
    */
   public static function permissionEmails($permissionName) {
-    $config = CRM_Core_Config::singleton();
-    return $config->userPermissionClass->permissionEmails($permissionName);
+    CRM_Core_Error::deprecatedFunctionWarning('use userPermissionClass');
+    return CRM_Core_Config::singleton()->userPermissionClass->permissionEmails($permissionName);
   }
 
   /**
@@ -1822,10 +1845,12 @@ class CRM_Core_Permission {
    *
    * @return string
    *   a comma separated list of email addresses
+   *
+   * @deprecated since 6.18 will be removed around 6.28
    */
   public static function roleEmails($roleName) {
-    $config = CRM_Core_Config::singleton();
-    return $config->userRoleClass->roleEmails($roleName);
+    CRM_Core_Error::deprecatedFunctionWarning('use userPermissionClass');
+    return CRM_Core_Config::singleton()->userRoleClass->roleEmails($roleName);
   }
 
   /**
@@ -1883,6 +1908,43 @@ class CRM_Core_Permission {
   protected static function getCoreAndComponentPermissions(): array {
     $permissions = self::getCorePermissions();
     $permissions = array_merge($permissions, self::getComponentPermissions());
+    return $permissions;
+  }
+
+  /**
+   * Formats permissions into a nested list for Select2
+   *
+   * @param array $groups Permission Types
+   *
+   * @return array[]
+   */
+  public static function getPermissionList(array $groups): array {
+    $perms = \Civi\Api4\Permission::get(FALSE)
+      ->addWhere('group', 'IN', $groups)
+      ->addWhere('is_active', '=', 1)
+      ->setOrderBy(['title' => 'ASC'])
+      ->execute();
+    $permissions = [];
+    $categories = [];
+    foreach ($perms as $perm) {
+      // By convention, permission labels begin with a category followed by a colon.
+      $titleParts = explode(':', $perm['title'], 2);
+      if (count($titleParts) === 1) {
+        array_unshift($titleParts, ts('Generic'));
+      }
+      $category = trim($titleParts[0]);
+      $categories[$category][] = [
+        'id' => $perm['name'],
+        'text' => ucfirst(trim($titleParts[1])),
+        'description' => $perm['description'] ?? NULL,
+      ];
+    }
+    foreach ($categories as $category => $perms) {
+      $permissions[] = [
+        'text' => $category,
+        'children' => $perms,
+      ];
+    }
     return $permissions;
   }
 

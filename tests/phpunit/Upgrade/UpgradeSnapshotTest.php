@@ -90,7 +90,7 @@ class UpgradeSnapshotTest extends \PHPUnit\Framework\TestCase {
       $cmd[] = getenv('UPGRADE_TEST_FILTER');
     }
     else {
-      $cmd[] = sprintf('5.13.3-multilingual_af_bg_en* "@4.7.30..%s:%d"', \CRM_Utils_System::version(), static::$limit);
+      $cmd[] = sprintf('"@%s..%s:%d"', \CRM_Upgrade_Form::MINIMUM_UPGRADABLE_VERSION, \CRM_Utils_System::version(), static::$limit);
     }
     // TODO: It may be nice to move the filtering logic from `civicrm-upgrade-examples` to the PHPUnit class.
     $cmdStr = implode(' ', $cmd);
@@ -113,8 +113,19 @@ class UpgradeSnapshotTest extends \PHPUnit\Framework\TestCase {
    */
   public function testSnapshot(string $snapshot): void {
     \Civi\Test::schema()->dropAll()->loadSnapshot($snapshot);
-    $cmd = sprintf('cd %s && cv updb -vv --no-interaction', escapeshellarg($GLOBALS['civicrm_root']));
 
+    // Simulate a sysadmin working with the pre-upgrade system.
+    // This just checks status. But you might also open login-screen, dashboard, admin UI.
+    $cmd = sprintf('cd %s && cv status', escapeshellarg($GLOBALS['civicrm_root']));
+    ProcessHelper::run($cmd, $stdout, $stderr, $exit);
+    $hasProblem = ($exit > 0) || !preg_match('/pending upgrade/', $stdout);
+    if ($hasProblem) {
+      echo ProcessHelper::formatOutput($cmd, $stdout, $stderr, $exit);
+      $this->fail('Upgrade workflow bug: Cannot run sysadmin command (cv status) before upgrade');
+    }
+
+    // Run the actual upgrade
+    $cmd = sprintf('cd %s && cv updb -vv --no-interaction', escapeshellarg($GLOBALS['civicrm_root']));
     ProcessHelper::run($cmd, $stdout, $stderr, $exit);
     $logs = [];
     foreach ((array) glob(static::$logDir . '/CiviCRM.*.log') as $logFile) {

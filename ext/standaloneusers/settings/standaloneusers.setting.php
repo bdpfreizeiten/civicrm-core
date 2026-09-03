@@ -2,11 +2,22 @@
 use CRM_Standaloneusers_ExtensionUtil as E;
 
 return [
+  'standaloneusers_allow_public_registration' => [
+    'name' => 'standaloneusers_allow_public_registration',
+    'group' => 'standaloneusers',
+    'type' => 'Boolean',
+    'title' => E::ts('Users Can Register'),
+    'description' => E::ts('Allow public user registration.'),
+    'default' => FALSE,
+    'html_type' => 'toggle',
+    'is_domain' => 1,
+    'is_contact' => 0,
+  ],
   'standaloneusers_session_max_lifetime' => [
     'name' => 'standaloneusers_session_max_lifetime',
     'group' => 'standaloneusers',
     'type' => 'Integer',
-    'title' => E::ts('Maxiumum Session Lifetime'),
+    'title' => E::ts('Maximum Session Lifetime'),
     'description' => E::ts('Duration (in minutes) until a user session expires'),
     // 24 days (= Drupal default)
     'default' => 24 * 24 * 60,
@@ -45,5 +56,40 @@ return [
       'min' => 0,
       'max' => 31,
     ],
+  ],
+  'standalone_favicon' => [
+    'name' => 'standalone_favicon',
+    'group' => 'standaloneusers',
+    'type' => 'File',
+    'file_is_public' => TRUE,
+    'title' => ts('Site Favicon'),
+    'help_text' => [
+      E::ts('Upload a logo or icon to represent this site in the browser tab.'),
+      E::ts('For best results, use a small, square image (512x512 pixels or less) with a transparent background. PNG file format is recommended. Other formats may work depending on your site configuration.'),
+    ],
+    'default' => NULL,
+    'validate_callback' => ['Civi\\Standalone\\Utils', 'validateFavicon'],
+    'is_domain' => 1,
+    'is_contact' => 0,
+    'html_type' => 'file',
+    'settings_pages' => ['display' => ['section' => 'theme', 'weight' => 120]],
+  ],
+  'standalone_timezone_default' => [
+    'name' => 'standalone_timezone_default',
+    'group' => 'standaloneusers',
+    'type' => 'String',
+    'default' => date_default_timezone_get(),
+    'html_type' => 'select',
+    'html_attributes' => [
+      'class' => 'huge crm-select2',
+    ],
+    'title' => E::ts('System Timezone'),
+    'is_domain' => 1,
+    'is_contact' => 0,
+    'description' => E::ts('Timezone for anonymous users and for user accounts using the default timezone.'),
+    'pseudoconstant' => [
+      'callback' => ['CRM_Standaloneusers_BAO_User', 'getTimeZones'],
+    ],
+    'settings_pages' => ['date' => ['section' => 'calendar', 'weight' => 0]],
   ],
 ];

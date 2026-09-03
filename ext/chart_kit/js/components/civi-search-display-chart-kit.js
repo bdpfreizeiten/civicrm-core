@@ -13,33 +13,26 @@
     connectedCallback() {
       super.connectedCallback();
 
-      // run initial settings through our legacy adaptor
-      this._settings = chartKitUtils.legacySettingsAdaptor(this.settings);
-
       this.renderContainer();
 
-      // add our trait functions to the pre and post search hooks
+      try {
+        this.loadSettings();
+      }
+      catch (e) {
+        this.chartContainer.innerText = e.message;
+      }
+
       this.onPreRun.push(() => {
-        // exit early if no chart type
-        if (!this.initChartType()) {
-          this.chartContainer.innerText = ts('No chart type');
+        if (!this.chartType) {
           return;
         }
-
-        this.renderLoading();
-
-        this.buildColumns();
-
-        this.alwaysSortByDimAscending();
+        this.toggleLoading(true);
       });
 
       this.onPostRun.push(() => {
-        // exit early if no chart type
-        if (!this.initChartType()) {
-          this.chartContainer.innerText = ts('No chart type');
+        if (!this.chartType) {
           return;
         }
-
         this.renderChart();
       });
     }
@@ -52,7 +45,7 @@
       super.attributeChangedCallback(name, oldValue, newValue);
 
       if (name === 'settings') {
-        this._onChangeSettings();
+        this.reloadSoon();
       }
     }
 
@@ -60,8 +53,8 @@
       return (this._settings && this._settings.format) ? this._settings.format.title : null;
     }
 
-    renderLoading() {
-      this.chartContainer.innerHTML = '<div class="crm-loading-spinner"></div>';
+    toggleLoading(loading = true) {
+      this.chartContainer?.classList.toggle('crm-search-loading-placeholder', loading);
     }
 
     renderContainer() {
@@ -70,17 +63,11 @@
 
           <div class="crm-chart-kit-chart-title"></div>
 
-          <div class="crm-chart-kit-chart-container">
-            <div class="
-          </div>
+          <div class="crm-chart-kit-chart-container"></div>
 
           <div class="crm-chart-kit-download-links"></div>
         </div>
       `;
-
-      this.renderTitle();
-
-      this.setStyles();
     }
 
     renderDownloadLinks() {
@@ -129,55 +116,51 @@
     alwaysSortByDimAscending() {
       const sortKeys = this.getSortKeys();
 
-      // stash a serialised string for quick checking in onSettingsChange
-      this._currentSortKeys = sortKeys.join(',');
       // always sort the query by X axis - we can handle differently when we pass to d3
       // but this is the only way to get magic that the server knows about the order
       // (like option groups / month order etc)
-      this._settings.sort = sortKeys.map((key) => [key, 'ASC']);
+      this.sort = sortKeys.map((key) => [key, 'ASC']);
     }
 
-    _onChangeSettings() {
-      // triggers re-rendering as you edit settings
-      // TODO: could this be quite js intensive on the client browser? should we make it optional?
-      clearTimeout(this.queuedSettingsChange);
-      this.queuedSettingsChange = setTimeout(() => {
-        if (!this.chartContainer) {
-          return;
-        }
-        // run initial settings through our legacy adaptor
-        this._settings = chartKitUtils.legacySettingsAdaptor(this.settings);
+    reloadSoon() {
+      this.toggleLoading(true);
+      clearTimeout(this.nextReload);
+      this.nextReload = setTimeout(() => this.reload(), 500);
+    }
 
-        this.renderTitle();
-        // just in case the chart type has been removed somehow
-        if (!this.initChartType()) {
-          this.chartContainer.innerText = ts('No chart type');
-          return;
-        }
+    reload() {
+      // before reloading the settings, take a note of what has previously been fetched
+      // from the server, so we know whether a refetch is required
+      const previousCols = this.getColumns().map((col) => col.key).join(',');
+      const previousSort = this.getSortKeys().join(',');
 
-        // force rebuild columns as they might have changed
-        this.buildColumns();
+      try {
+        this.loadSettings();
+      }
+      catch (e) {
+        this.toggleLoading(false);
+        this.chartContainer.innerText = e.message;
+        // if error loading settings, go no further
+        return;
+      }
 
-        // if sort keys have changed, we need to re-run the search to get new ordering
-        // from the server
-        const newSortKeysSerialised = this.getSortKeys().join(',');
-        if (this._currentSortKeys !== newSortKeysSerialised) {
-          this.getResultsSoon();
-        } else {
-          // just rerender on the front end
-          this.renderChart();
-        }
-      }, 500);
+      // if sort keys have changed, we need to re-run the search to get new ordering
+      const newCols = this.getColumns().map((col) => col.key).join(',');
+      const newSort = this.getSortKeys().join(',');
+      if (!this.results || newCols !== previousCols || newSort !== previousSort) {
+        this.getResultsSoon();
+      } else {
+        // we can just rerender on the clientside
+        this.renderChart();
+      }
     }
 
     // this provides the common render steps - which chart types can then hook
     // into at different points
     renderChart() {
-      //this.renderContainer();
-      // this.renderLoading();
-
       if (this.results.length === 0) {
-        // show a no results type thing
+        // show a no results message
+        this.toggleLoading(false);
         this.chartContainer.innerText = ts('Search returned no results.');
         return;
       }
@@ -204,20 +187,39 @@
       // run the dc render
       this.chart.render();
       this.renderDownloadLinks();
+      this.toggleLoading(false);
+    }
+
+    loadSettings() {
+      if (!Object.keys(this.settings).length) {
+        // ignore empty settings - this happens more than you'd like
+        // because of the angular wrapper
+        return;
+      }
+
+      this._settings = chartKitUtils.legacySettingsAdaptor(this.settings);
+
+      this.initChartType();
+
+      this.buildColumns();
+
+      this.alwaysSortByDimAscending();
+
+      this.renderTitle();
+
+      this.setStyles();
     }
 
     initChartType() {
       const key = this._settings.chartType;
       const type = chartKitChartTypes.find((type) => type.key === key);
       if (!type) {
-        this.chartContainer.innerText = ts('No chart type selected.');
-        return false;
+        throw new Error(ts('No chart type selected'));
       }
       this.chartType = chartKitTypeBackends[type.backend];
       if (!this.chartType) {
-        return false;
+        throw new Error(ts('Chart type backend not found'));
       }
-      return true;
     }
 
     buildCrossfilter() {
@@ -326,11 +328,19 @@
           // timescale
           this.chart.x(d3.scaleTime().domain([min, max]).nice());
           break;
+
         case 'categorical':
           this.chart
             .x(d3.scaleBand().domain(xDomainValues))
             .xUnits(dc.units.ordinal);
           break;
+
+        case 'integer':
+          this.chart
+            .x(d3.scaleBand().domain(d3.range(min, max + 1)))
+            .xUnits(dc.units.ordinal);
+          break;
+
         default:
           // regular linear scale
           this.chart.x(d3.scaleLinear().domain([min, max]).nice());
@@ -368,11 +378,11 @@
       this.chart
         .width(() => (this._settings.format.width))
         .height(() => (this._settings.format.height))
-        .on('pretransition', chart => {
-          chart.selectAll('text').attr('fill', this._settings.format.labelColor);
+        .on('pretransition', () => {
           // we need to add the background here as well as to the containing div
           // in order for inclusion in exports
-          chart.svg().style('background', this._settings.format.backgroundColor);
+          this.chart.svg().style('background', this._settings.format.backgroundColor);
+          this.chart.selectAll('text').attr('fill', this._settings.format.labelColor);
         });
 
       if (this.chartType.hasCoordinateGrid()) {
@@ -516,7 +526,7 @@
     }
 
     getColumns() {
-      return this.columns;
+      return this.columns ? this.columns : [];
     }
 
     getDimensionColumns() {
@@ -585,6 +595,9 @@
     setCanvasStyles() {
       const formatSettings = this._settings.format ? this._settings.format : {};
 
+      if (formatSettings.labelColor) {
+        this.chartCanvas.style.setProperty('--crm-text-color', formatSettings.labelColor);
+      }
       this.chartCanvas.style.backgroundColor = formatSettings.backgroundColor;
       this.chartCanvas.style.padding = formatSettings.padding ? formatSettings.padding.outer : null;
       this.chartCanvas.style.display = 'inline-block';
@@ -592,8 +605,8 @@
 
     setContainerStyles() {
       const formatSettings = this._settings.format ? this._settings.format : {};
-      this.chartContainer.style.height = formatSettings.height;
-      this.chartContainer.style.width = formatSettings.width;
+      this.chartContainer.style.height = formatSettings.height ? `${formatSettings.height}px` : null;
+      this.chartContainer.style.width = formatSettings.width ? `${formatSettings.width}px` : null;
       this.chartContainer.style.margin = formatSettings.padding ? formatSettings.padding.inner : null;
     }
 

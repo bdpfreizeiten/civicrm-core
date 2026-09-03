@@ -18,7 +18,7 @@
       mode: '@'
     },
     controllerAs: 'editor',
-    controller: function($scope, crmApi4, crmUiHelp, afGui, $parse, $timeout, $location, $route, $rootScope, formatForSelect2) {
+    controller: function($scope, $element, crmApi4, crmUiHelp, afGui, $parse, $timeout, $location, $route, $rootScope, crmEntityTagsCache) {
       const ts = $scope.ts = CRM.ts('org.civicrm.afform_admin');
       $scope.hs = crmUiHelp({file: 'CRM/AfformAdmin/afformBuilder'});
 
@@ -33,7 +33,41 @@
       let undoAction = null;
       let lastSaved = {};
       const sortableOptions = {};
-      this.afformTags = formatForSelect2(this.meta.afform_fields.tags.options || [], 'id', 'label', ['description', 'color']);
+      // crm-entity-tags works in terms of real tag ids; Afform.tags is stored as tag names for
+      // portability across sites (see AfformTags::getTagOptions). afformTagsList/afformTagIds
+      // bridge the two - populated once the shared tag list loads, then kept in sync below.
+      // afformTagsList stays the same array crmEntityTagsCache resolved, so a tag the widget
+      // creates inline (which is pushed into that array in place) is visible here too.
+      this.afformTagIds = [];
+      let afformTagsList = [];
+      function syncAfformTagIds() {
+        editor.afformTagIds = afformTagsList
+          .filter((tag) => (editor.afform.tags || []).includes(tag.name))
+          .map((tag) => tag.id);
+      }
+      // Loads (once, cached) the full list of tags used_for Afform, then computes the
+      // initial afformTagIds selection now that afformTagsList is populated.
+      crmEntityTagsCache.get('Afform').then(function(tags) {
+        afformTagsList = tags;
+        syncAfformTagIds();
+      });
+
+      // The widget mutates afformTagIds directly (toggle/create); mirror that back into
+      // editor.afform.tags (by name) so it's what actually gets saved & undo-tracked. The
+      // equality check avoids re-triggering the undo-history watch below when the names
+      // round-trip to the same set they started from.
+      $scope.$watchCollection('editor.afformTagIds', function(newIds, oldIds) {
+        if (newIds === oldIds) {
+          return;
+        }
+        const names = afformTagsList
+          .filter((tag) => newIds.includes(tag.id))
+          .map((tag) => tag.name)
+          .sort();
+        if (!_.isEqual(names, (editor.afform.tags || []).slice().sort())) {
+          editor.afform.tags = names;
+        }
+      });
 
       // ngModelOptions to debounce input
       // Used to prevent cluttering the undo history with every keystroke
@@ -110,8 +144,10 @@
         if (!editor.afform.placement_filters || Array.isArray(editor.afform.placement_filters)) {
           editor.afform.placement_filters = {};
         }
-        $scope.canvasTab = 'layout';
-        $scope.layoutHtml = '';
+        editor.canvasTab = 'layout';
+        editor.layoutHtml = '';
+        editor.markupEditMode = false;
+        editor.markupEditBaseline = '';
         $scope.entities = {};
         setEditorLayout();
         setLastSaved();
@@ -205,8 +241,9 @@
         undoPosition += direction;
         undoAction = 'change';
         editor.afform = _.cloneDeep(undoHistory[undoPosition].afform);
+        syncAfformTagIds();
         setEditorLayout();
-        $scope.canvasTab = 'layout';
+        editor.canvasTab = 'layout';
         $scope.selectedEntityName = undoHistory[undoPosition].selectedEntityName;
       }
 
@@ -222,15 +259,120 @@
         return editor.afform.type;
       };
 
+      this.getFormTypeLabel = () => {
+        const options = this.meta.afform_fields.type.options;
+        return options.find(option => option.id === editor.afform.type).label;
+      };
+
+      this.checkPerm = function(permissionName) {
+        return CRM.checkPerm(permissionName);
+      };
+
       $scope.updateLayoutHtml = function() {
-        $scope.layoutHtml = '...Loading...';
+        editor.layoutHtml = '...Loading...';
         crmApi4('Afform', 'convert', {layout: editor.afform.layout, from: 'deep', to: 'html', formatWhitespace: true})
-          .then(function(r){
-            $scope.layoutHtml = r[0].layout || '(Error)';
+          .then((r) => {
+            editor.layoutHtml = r[0].layout || '(Error)';
           })
-          .catch(function(r){
-            $scope.layoutHtml = '(Error)';
+          .catch((r) => {
+            editor.layoutHtml = '(Error)';
           });
+      };
+
+      // Minimal sanity check - not full schema validation, just guards against the markup
+      // editor producing something obviously broken (e.g. a lost <af-form> wrapper).
+      function isValidLayout(layout) {
+        if (!Array.isArray(layout) || !layout.length) {
+          return false;
+        }
+        if (editor.getFormType() === 'form') {
+          return afGui.findRecursive(layout, {'#tag': 'af-form'}).length === 1;
+        }
+        return true;
+      }
+
+      // Converts the edited markup back into the layout tree and applies it to the working form.
+      // Returns a promise resolving true on success, false if the markup couldn't be applied.
+      function applyMarkupToLayout() {
+        return crmApi4('Afform', 'convert', {layout: editor.layoutHtml, from: 'html', to: 'deep', formatWhitespace: true})
+          .then((r) => {
+            const newLayout = r[0].layout;
+            if (!isValidLayout(newLayout)) {
+              CRM.alert(ts('The markup could not be applied because it produced an invalid layout structure.'), ts('Invalid markup'), 'error');
+              return false;
+            }
+            editor.afform.layout = newLayout;
+            setEditorLayout();
+            if (editor.getFormType() === 'form') {
+              $scope.entities = _.mapValues(afGui.findRecursive(editor.layout['#children'], {'#tag': 'af-entity'}, 'name'), backfillEntityDefaults);
+            }
+            else if (editor.getFormType() === 'search') {
+              editor.searchDisplays = getSearchDisplaysOnForm();
+            }
+            editor.markupEditMode = false;
+            return true;
+          })
+          .catch((error) => {
+            const message = error?.error_message ? error.error_message : ts('Unknown error');
+            CRM.alert(message, ts('Could not apply markup'), 'error');
+            return false;
+          });
+      }
+
+      $scope.hasUnappliedMarkupEdits = function() {
+        return editor.markupEditMode && editor.layoutHtml !== editor.markupEditBaseline;
+      };
+
+      // Prompts to apply or discard pending markup edits (e.g. before leaving edit mode
+      // or switching to the Layout tab). Does nothing if the user cancels.
+      function resolvePendingMarkupEdits(onDiscard, onApply) {
+        CRM.confirm({
+          title: ts('Unsaved markup changes'),
+          message: ts('You have made changes to the markup. Apply them to the layout, or discard them, before continuing.'),
+          options: {
+            cancel: ts('Cancel'),
+            discard: ts('Discard changes'),
+            apply: ts('Apply changes'),
+          },
+        })
+          .on('crmConfirm:discard', function() {
+            $scope.$apply(function() {
+              editor.layoutHtml = editor.markupEditBaseline;
+              editor.markupEditMode = false;
+              onDiscard();
+            });
+          })
+          .on('crmConfirm:apply', function() {
+            applyMarkupToLayout().then((applied) => {
+              if (applied) {
+                onApply();
+              }
+              // else: stay put, still in edit mode, so the user can fix their HTML
+            });
+          });
+      }
+
+      $scope.toggleMarkupEdit = function() {
+        if (!editor.markupEditMode) {
+          editor.markupEditBaseline = editor.layoutHtml;
+          editor.markupEditMode = true;
+          return;
+        }
+        if (!$scope.hasUnappliedMarkupEdits()) {
+          editor.markupEditMode = false;
+          return;
+        }
+        resolvePendingMarkupEdits(angular.noop, angular.noop);
+      };
+
+      $scope.switchToLayoutTab = function() {
+        if (!$scope.hasUnappliedMarkupEdits()) {
+          editor.markupEditMode = false;
+          editor.canvasTab = 'layout';
+          return;
+        }
+        const goToLayout = () => { editor.canvasTab = 'layout'; };
+        resolvePendingMarkupEdits(goToLayout, goToLayout);
       };
 
       this.addEntity = function(type, selectTab) {
@@ -267,7 +409,7 @@
             fieldset['af-title'] = meta.label + ' ' + num;
             // Add boilerplate contents if any
             if (Array.isArray(meta.boilerplate) && meta.boilerplate.length) {
-              fieldset['#children'].push(...meta.boilerplate);
+              fieldset['#children'].push(..._.cloneDeep(meta.boilerplate));
             }
             // Attempt to place the new af-fieldset after the last one on the form
             pos = 1 + _.findLastIndex(editor.layout['#children'], 'af-fieldset');
@@ -280,7 +422,7 @@
           delete $scope.entities[type + num].loading;
           if (selectTab) {
             editor.selectEntity(type + num);
-            $timeout(function() {
+            $timeout(() => {
               editor.scrollToEntity(type + num);
             });
           }
@@ -294,7 +436,7 @@
           crmApi4('Afform', 'loadAdminData', {
             definition: {type: 'form'},
             entity: type
-          }, 0).then(function(data) {
+          }, 0).then((data) => {
             afGui.addMeta(data);
             addToCanvas();
           });
@@ -460,7 +602,7 @@
 
       this.placementRequiresServerRoute = function() {
         let requiresServerRoute = false;
-        editor.afform.placement.forEach(function(placement) {
+        editor.afform.placement.forEach((placement) => {
           const item = editor.meta.afform_placement.find(item => item.id === placement);
           if (item && item.filter) {
             requiresServerRoute = item.text;
@@ -483,15 +625,15 @@
           isJoin = function (item) {
             return _.isPlainObject(item) && ('af-join' in item);
           };
-        _.each(fieldsets, function(fieldset) {
-          _.each(afGui.getFormElements(fieldset['#children'], {'#tag': 'af-field'}, isJoin), function(field) {
+        fieldsets.forEach((fieldset) => {
+          afGui.getFormElements(fieldset['#children'], {'#tag': 'af-field'}, isJoin).forEach((field) => {
             if (field.name) {
               entityFields.fields.push(fillFieldDefn(entityType, field));
             }
           });
-          _.each(afGui.getFormElements(fieldset['#children'], isJoin), function(join) {
+          afGui.getFormElements(fieldset['#children'], isJoin).forEach((join) => {
             const joinFields = [];
-            _.each(afGui.getFormElements(join['#children'], {'#tag': 'af-field'}), function(field) {
+            afGui.getFormElements(join['#children'], {'#tag': 'af-field'}).forEach((field) => {
               if (field.name) {
                 joinFields.push(fillFieldDefn(join['af-join'], field));
               }
@@ -553,34 +695,35 @@
           select: ['name', 'label', 'parent_id', 'icon'],
           where: conditions,
           orderBy: {weight: 'ASC'}
-        }).then(function(items) {
+        }).then((items) => {
           editor.navigationMenu = buildTree(items, null);
         });
       }
 
       function buildTree(items, parentId) {
-        return _.transform(items, function(navigationMenu, item) {
+        return items.reduce((navigationMenu, item) => {
           if (parentId === item.parent_id) {
-            const children = buildTree(items, item.id),
-              menuItem = {
-                id: item.name,
-                text: item.label,
-                icon: item.icon
-              };
+            const children = buildTree(items, item.id);
+            const menuItem = {
+              id: item.name,
+              text: item.label,
+              icon: item.icon
+            };
             if (children.length) {
               menuItem.children = children;
             }
             navigationMenu.push(menuItem);
           }
+          return navigationMenu;
         }, []);
       }
 
       // Collects all search displays currently on the form
       function getSearchDisplaysOnForm() {
         const searchFieldsets = afGui.findRecursive(editor.afform.layout, {'af-fieldset': ''});
-        return _.transform(searchFieldsets, function(searchDisplays, fieldset) {
-          const displayElement = afGui.findRecursive(fieldset['#children'], function (item) {
-            return item['search-name'] && item['#tag'] && item['#tag'].indexOf('crm-search-display-') === 0;
+        return searchFieldsets.reduce((searchDisplays, fieldset) => {
+          const displayElement = afGui.findRecursive(fieldset['#children'], (item) => {
+            return item['search-name'] && item['#tag'] && afGui.meta.searchDisplayTags.includes(item['#tag']);
           })[0];
           if (displayElement) {
             searchDisplays[displayElement['search-name'] + (displayElement['display-name'] ? '.' + displayElement['display-name'] : '')] = {
@@ -589,6 +732,7 @@
               settings: afGui.getSearchDisplay(displayElement['search-name'], displayElement['display-name'])
             };
           }
+          return searchDisplays;
         }, {});
       }
 
@@ -599,7 +743,7 @@
         // A value means it's alredy loaded. Null means it's loading.
         if (!editor.searchOptions && editor.searchOptions !== null) {
           editor.searchOptions = null;
-          afGui.getAllSearchDisplays().then(function(links) {
+          afGui.getAllSearchDisplays().then((links) => {
             editor.searchOptions = links;
           });
         }
@@ -638,7 +782,7 @@
           crmApi4('Afform', 'loadAdminData', {
             definition: {type: 'search'},
             entity: display.key
-          }, 0).then(function(data) {
+          }, 0).then((data) => {
             afGui.addMeta(data);
             meta.settings = afGui.getSearchDisplay(searchName, displayName);
             addToCanvas();
@@ -709,6 +853,21 @@
       };
 
       $scope.save = function() {
+        if ($scope.hasUnappliedMarkupEdits()) {
+          applyMarkupToLayout().then((applied) => {
+            if (applied) {
+              doSave();
+            }
+          });
+          return;
+        }
+        doSave();
+      };
+
+      function doSave() {
+        // save and close any open rich text elements
+        $element[0].querySelectorAll('civi-rich-text-input[editing]').forEach((el) => el.saveAndCloseEditor());
+
         const afform = JSON.parse(angular.toJson(editor.afform));
         // This might be set to undefined by validation
         afform.server_route = afform.server_route || '';
@@ -718,7 +877,7 @@
         }
         $scope.saving = true;
         crmApi4('Afform', 'save', {formatWhitespace: true, records: [afform]})
-          .then(function (data) {
+          .then((data) => {
             $scope.saving = false;
             // When saving a new form for the first time
             if (!editor.afform.name) {
@@ -728,7 +887,7 @@
               changePathQuietly('/edit/' + data[0].name);
             }
             // Update undo history - mark current snapshot as "saved"
-            _.each(undoHistory, function(snapshot, index) {
+            undoHistory.forEach((snapshot, index) => {
               snapshot.saved = index === undoPosition;
               snapshot.afform.name = data[0].name;
             });
@@ -739,12 +898,17 @@
               refreshMenubar();
             }
             setLastSaved();
+          })
+          .catch((error) => {
+            const message = error?.error_message ? error.error_message : ts('Unknown error');
+            CRM.alert(message, ts('Save failed'), 'error');
+            $scope.saving = false;
           });
-      };
+      }
 
       $scope.$watch('editor.afform.title', function(newTitle, oldTitle) {
         if (typeof oldTitle === 'string') {
-          _.each($scope.entities, function(entity) {
+          Object.values($scope.entities).forEach((entity) => {
             if (entity.data && 'source' in entity.data && (entity.data.source || '') === oldTitle) {
               entity.data.source = newTitle;
             }
@@ -796,6 +960,67 @@
         });
         return $location.path(newPath);
       }
+
+      this.getTokens = (includeSubmissionTokens = false) => {
+        const allTokens = [];
+        this.getEntities().forEach((entity) => {
+          const entityTokens = [];
+          const entityMeta = this.meta.entities[entity.type];
+          const entityLabel = entity.label || entityMeta.label;
+          if (entityMeta.submissionTokens && includeSubmissionTokens) {
+            // Explicitly defined submission tokens e.g. by FormProcessor extension
+            entityMeta.submissionTokens.forEach((submissionToken) => {
+              entityTokens.push({
+                id: entity.name + '.0.' + submissionToken.token,
+                text: submissionToken.label,
+                description: submissionToken.description ?? '',
+              });
+            });
+          } else if (!entityMeta.submissionTokens) {
+            // Primary key token
+            // FIXME: not all entities use `id` for primary key
+            if (includeSubmissionTokens) {
+              entityTokens.push({
+                id: entity.name + '.0.id',
+                text: ts('%1 ID', {1: entityMeta.label}),
+              });
+            }
+            // Tokens from entity data values
+            if (entity.data) {
+              Object.keys(entity.data).forEach((key) => {
+                if (entityMeta.fields[key]) {
+                  entityTokens.push({
+                    id: entity.name + '.0.' + key,
+                    text: entityMeta.fields[key].label,
+                  });
+                }
+              });
+            }
+            // Tokens from entity fields on the form
+            this.getEntityFields(entity.name).fields.forEach((field) => {
+              entityTokens.push({
+                id: entity.name + '.0.' + field.name,
+                text: field.label,
+              });
+            });
+          }
+          if (entityTokens.length) {
+            allTokens.push({
+              text: entityLabel,
+              children: entityTokens,
+            });
+          }
+        });
+        if (includeSubmissionTokens) {
+          allTokens.push({
+            text: ts('Form'),
+            children: [
+              {id: 'token', text: ts('Submission JWT')},
+            ],
+          });
+        }
+        return allTokens;
+      };
 
     }
   });

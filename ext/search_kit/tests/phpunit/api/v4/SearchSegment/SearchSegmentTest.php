@@ -334,4 +334,152 @@ class SearchSegmentTest extends \PHPUnit\Framework\TestCase implements HeadlessI
     $this->assertEquals(1, $result[3]['data']['COUNT_id']);
   }
 
+  public function testSegmentWithContainsOperators(): void {
+    \CRM_Core_BAO_ConfigSetting::enableComponent('CiviEvent');
+
+    SearchSegment::create(FALSE)
+      ->addValue('label', 'Participant Role Cluster')
+      ->addValue('entity_name', 'Participant')
+      ->addValue('items', [
+        [
+          'label' => 'Worker',
+          'when' => [
+            [
+              'role_id:name',
+              'CONTAINS ONE OF',
+              ['Volunteer', 'Host', 'Speaker'],
+            ],
+          ],
+        ],
+        [
+          'label' => 'Non-Worker',
+          'when' => [
+            [
+              'role_id:name',
+              'NOT CONTAINS ONE OF',
+              ['Volunteer', 'Host', 'Speaker'],
+            ],
+          ],
+        ],
+      ])->execute();
+
+    SearchSegment::create(FALSE)
+      ->addValue('label', 'Is Volunteer')
+      ->addValue('entity_name', 'Participant')
+      ->addValue('items', [
+        [
+          'label' => 'Yes',
+          'when' => [
+            [
+              'role_id:name',
+              'CONTAINS',
+              'Volunteer',
+            ],
+          ],
+        ],
+        [
+          'label' => 'No',
+          'when' => [
+            [
+              'role_id:name',
+              'NOT CONTAINS',
+              'Volunteer',
+            ],
+          ],
+        ],
+      ])->execute();
+
+    // Create test contacts
+    $contacts = Contact::save(FALSE)
+      ->setRecords([[], [], [], [], []])
+      ->execute();
+    $contactIds = $contacts->column('id');
+
+    // Create test event
+    $event = civicrm_api4('Event', 'create', [
+      'checkPermissions' => FALSE,
+      'values' => [
+        'title' => 'Test Event',
+        'event_type_id' => 1,
+        'start_date' => 'now',
+      ],
+    ])->single();
+
+    // Create participants with various roles
+    $sampleData = [
+      ['contact_id' => $contactIds[0], 'role_id:name' => ['Volunteer']],
+      ['contact_id' => $contactIds[1], 'role_id:name' => ['Host', 'Speaker']],
+      ['contact_id' => $contactIds[2], 'role_id:name' => ['Attendee']],
+      ['contact_id' => $contactIds[3], 'role_id:name' => ['Attendee', 'Volunteer']],
+      ['contact_id' => $contactIds[4], 'role_id:name' => ['Attendee']],
+    ];
+
+    civicrm_api4('Participant', 'save', [
+      'checkPermissions' => FALSE,
+      'defaults' => [
+        'event_id' => $event['id'],
+        'status_id:name' => 'Registered',
+      ],
+      'records' => $sampleData,
+    ]);
+
+    $getField = civicrm_api4('Participant', 'getFields', [
+      'checkPermissions' => FALSE,
+      'where' => [['name', '=', 'segment_Participant_Role_Cluster']],
+      'loadOptions' => TRUE,
+    ])->single();
+
+    $this->assertEquals('Participant Role Cluster', $getField['label']);
+    $this->assertEquals(['Worker', 'Non-Worker'], $getField['options']);
+
+    $params = [
+      'checkPermissions' => FALSE,
+      'return' => 'page:1',
+      'savedSearch' => [
+        'api_entity' => 'Participant',
+        'api_params' => [
+          'version' => 4,
+          'select' => [
+            'segment_Participant_Role_Cluster:label',
+            'COUNT(id) AS COUNT_id',
+          ],
+          'where' => [['event_id', '=', $event['id']]],
+          'groupBy' => [
+            'segment_Participant_Role_Cluster',
+          ],
+          'join' => [],
+          'having' => [],
+        ],
+      ],
+      'sort' => [['segment_Participant_Role_Cluster:label', 'ASC']],
+    ];
+
+    $result = civicrm_api4('SearchDisplay', 'run', $params);
+    $this->assertCount(2, $result);
+
+    // Non-Worker cluster should have 2 participants (Attendee only)
+    $this->assertEquals('Non-Worker', $result[0]['columns'][0]['val']);
+    $this->assertEquals(2, $result[0]['data']['COUNT_id']);
+
+    // Worker cluster should have 3 participants (Volunteer, Host+Speaker, Attendee+Volunteer)
+    $this->assertEquals('Worker', $result[1]['columns'][0]['val']);
+    $this->assertEquals(3, $result[1]['data']['COUNT_id']);
+
+    // Test second segment using CONTAINS / NOT CONTAINS operators
+    $params['savedSearch']['api_params']['select'][0] = 'segment_Is_Volunteer:label';
+    $params['savedSearch']['api_params']['groupBy'][0] = 'segment_Is_Volunteer';
+    $params['sort'] = [['segment_Is_Volunteer:label', 'ASC']];
+
+    $result = civicrm_api4('SearchDisplay', 'run', $params);
+    $this->assertCount(2, $result);
+
+    // Non-Volunteer cluster should have 3 participants (Host+Speaker, Attendee, Attendee)
+    $this->assertEquals('No', $result[0]['columns'][0]['val']);
+    $this->assertEquals(3, $result[0]['data']['COUNT_id']);
+
+    // Volunteer cluster should have 2 participants (Volunteer, Attendee+Volunteer)
+    $this->assertEquals('Yes', $result[1]['columns'][0]['val']);
+    $this->assertEquals(2, $result[1]['data']['COUNT_id']);
+  }
+
 }

@@ -88,9 +88,10 @@ class SettingsMetadata {
     if ($domainID === NULL) {
       $domainID = \CRM_Core_Config::domainID();
     }
+    $civicrmLocale = \CRM_Core_I18n::getLocale();
 
     $cache = \Civi::cache('settings');
-    $cacheString = 'settingsMetadata_' . $domainID . '_';
+    $cacheString = 'settingsMetadata_' . $domainID . '_' . $civicrmLocale;
     $settingsMetadata = $cache->get($cacheString);
 
     if (!is_array($settingsMetadata)) {
@@ -171,8 +172,6 @@ class SettingsMetadata {
   protected static function _filterSettingsSpecification($filters, &$settingSpec) {
     if (!empty($filters['name'])) {
       $settingSpec = array_intersect_key($settingSpec, array_flip((array) $filters['name']));
-      // FIXME: This is a workaround for settingsBag::setDb() called by unit tests with settings names that don't exist
-      $settingSpec += array_fill_keys((array) $filters['name'], []);
       unset($filters['name']);
     }
     if (!empty($filters)) {

@@ -19,8 +19,6 @@ use Civi\FlexMailer\FlexMailer;
  * @copyright CiviCRM LLC https://civicrm.org/licensing
  */
 
-require_once 'Mail.php';
-
 /**
  * Class CRM_Mailing_BAO_MailingJob
  */
@@ -250,6 +248,10 @@ class CRM_Mailing_BAO_MailingJob extends CRM_Mailing_DAO_MailingJob {
 
       $anyChildLeft = CRM_Core_DAO::singleValueQuery($child_job_sql, $params);
 
+      if (!$anyChildLeft) {
+        $anyChildLeft = self::queueMissingRecipients((int) $job->mailing_id, (int) $job->id);
+      }
+
       // all of the child jobs are complete, update
       // the parent job as well as the mailing status
       if (!$anyChildLeft) {
@@ -274,6 +276,83 @@ class CRM_Mailing_BAO_MailingJob extends CRM_Mailing_DAO_MailingJob {
         CRM_Utils_Hook::postMailing($job->mailing_id);
       }
     }
+  }
+
+  /**
+   * Stopgap to find and enqueue any missing mailing recipients.
+   *
+   * This shouldn't be needed, but it's been reported that the initial mailing job sometimes misses recipients.
+   * This searches for any missing recipients and creates a child mailing job for them.
+   *
+   * @see https://lab.civicrm.org/dev/core/-/work_items/6678
+   *
+   * @param int $mailingID
+   * @param int $parentJobID
+   *
+   * @return bool True if a new child job was created for unqueued recipients, false otherwise.
+   */
+  private static function queueMissingRecipients(int $mailingID, int $parentJobID): bool {
+    $sql = "
+      SELECT mr.email_id, mr.contact_id, mr.phone_id
+      FROM civicrm_mailing_recipients mr
+      LEFT JOIN civicrm_mailing_event_queue meq
+        ON meq.mailing_id = mr.mailing_id
+        AND meq.is_test = 0
+        AND (
+          (mr.email_id IS NOT NULL AND mr.email_id = meq.email_id)
+          OR (mr.phone_id IS NOT NULL AND mr.phone_id = meq.phone_id)
+        )
+      INNER JOIN civicrm_contact cc ON cc.id = mr.contact_id
+      WHERE mr.mailing_id = %1
+        AND meq.id IS NULL
+        AND (mr.email_id > 0 OR mr.phone_id > 0)
+        AND cc.is_opt_out = 0
+    ";
+
+    $unsent = CRM_Core_DAO::executeQuery($sql, [1 => [$mailingID, 'Integer']])->fetchAll();
+    if (count($unsent) === 0) {
+      return FALSE;
+    }
+
+    // Calculate offset of next job
+    $maxOffset = (int) CRM_Core_DAO::singleValueQuery("
+      SELECT MAX(job_offset) FROM civicrm_mailing_job WHERE mailing_id = %1 AND job_type = 'child'
+    ", [1 => [$mailingID, 'Integer']]);
+    $mailerBatchLimit = Civi::settings()->get('mailerBatchLimit');
+    if ($mailerBatchLimit) {
+      $nextOffset = (int) CRM_Mailing_BAO_MailingRecipients::mailingSize($mailingID) + (int) $mailerBatchLimit;
+    }
+    else {
+      $nextOffset = (int) CRM_Mailing_BAO_MailingRecipients::mailingSize($mailingID) + count($unsent);
+    }
+
+    $newJob = MailingJob::create(FALSE)->setValues([
+      'mailing_id' => $mailingID,
+      'job_type' => 'child',
+      'parent_id' => $parentJobID,
+      'job_offset' => $nextOffset,
+      'job_limit' => count($unsent),
+      'status' => 'Scheduled',
+    ])->execute()->first();
+
+    $records = array_map(fn($row) => [
+      'job_id' => $newJob['id'],
+      'mailing_id' => $mailingID,
+      'is_test' => FALSE,
+      'email_id' => $row['email_id'] ? (int) $row['email_id'] : NULL,
+      'contact_id' => (int) $row['contact_id'],
+      'phone_id' => $row['phone_id'] ? (int) $row['phone_id'] : NULL,
+    ], $unsent);
+
+    CRM_Mailing_Event_BAO_MailingEventQueue::writeRecords($records);
+
+    Civi::log()->notice("MAILING RECIPIENT IRREGULARITY FIXED: Mailing #{mailing_id} missed {count} recipient(s) in its initial queue. Additional job #{job_id} has been created to ensure the missing recipient(s) receive the mailing. Please report this on https://lab.civicrm.org/dev/core/-/work_items/6678 to help us track down why these irregularities happen in the first place.", [
+      'mailing_id' => $mailingID,
+      'count' => count($records),
+      'job_id' => $newJob['id'],
+    ]);
+
+    return TRUE;
   }
 
   /**
@@ -560,18 +639,14 @@ AND    status IN ( 'Scheduled', 'Running', 'Paused' )
    *   The id of the mailing to be paused.
    */
   public static function pause($mailingID) {
-    $sql = "
-      UPDATE civicrm_mailing_job
-      SET status = 'Paused'
-      WHERE mailing_id = %1
-      AND is_test = 0
-      AND status IN ('Scheduled', 'Running')
-    ";
+    MailingJob::update(FALSE)
+      ->setValues(['status:name' => 'Paused'])
+      ->addWhere('mailing_id', '=', $mailingID)
+      ->execute();
     Mailing::update(FALSE)
       ->setValues(['status:name' => 'Paused'])
       ->addWhere('id', '=', $mailingID)
       ->execute();
-    CRM_Core_DAO::executeQuery($sql, [1 => [$mailingID, 'Integer']]);
   }
 
   /**
@@ -581,25 +656,14 @@ AND    status IN ( 'Scheduled', 'Running', 'Paused' )
    *   The id of the mailing to be resumed.
    */
   public static function resume($mailingID) {
-    $sql = "
-      UPDATE civicrm_mailing_job
-      SET status = 'Scheduled'
-      WHERE mailing_id = %1
-      AND is_test = 0
-      AND start_date IS NULL
-      AND status = 'Paused'
-    ";
-    CRM_Core_DAO::executeQuery($sql, [1 => [$mailingID, 'Integer']]);
-
-    $sql = "
-      UPDATE civicrm_mailing_job
-      SET status = 'Running'
-      WHERE mailing_id = %1
-      AND is_test = 0
-      AND start_date IS NOT NULL
-      AND status = 'Paused'
-    ";
-    CRM_Core_DAO::executeQuery($sql, [1 => [$mailingID, 'Integer']]);
+    MailingJob::update(FALSE)
+      ->setValues(['status:name' => 'Scheduled'])
+      ->addWhere('mailing_id', '=', $mailingID)
+      ->execute();
+    Mailing::update(FALSE)
+      ->setValues(['status:name' => 'Scheduled'])
+      ->addWhere('id', '=', $mailingID)
+      ->execute();
   }
 
   /**
@@ -661,17 +725,12 @@ AND    status IN ( 'Scheduled', 'Running', 'Paused' )
     &$mailing,
     $job_date
   ) {
-    static $activityTypeID = NULL;
-    static $writeActivity = NULL;
-
     if (!empty($deliveredParams)) {
       CRM_Mailing_Event_BAO_MailingEventDelivered::bulkCreate($deliveredParams);
       $deliveredParams = [];
     }
 
-    if ($writeActivity === NULL) {
-      $writeActivity = Civi::settings()->get('write_activity_record');
-    }
+    $writeActivity = Civi::settings()->get('write_activity_record');
 
     if (!$writeActivity) {
       return TRUE;
@@ -679,78 +738,100 @@ AND    status IN ( 'Scheduled', 'Running', 'Paused' )
 
     $result = TRUE;
     if (!empty($targetParams) && !empty($mailing->scheduled_id)) {
+      if ($mailing->sms_provider_id) {
+        $mailing->subject = $mailing->name;
+        $activityTypeID = CRM_Core_PseudoConstant::getKey('CRM_Activity_BAO_Activity', 'activity_type_id', 'Mass SMS');
+      }
+      else {
+        $activityTypeID = CRM_Core_PseudoConstant::getKey('CRM_Activity_BAO_Activity', 'activity_type_id', 'Bulk Email');
+      }
       if (!$activityTypeID) {
-        if ($mailing->sms_provider_id) {
-          $mailing->subject = $mailing->name;
-          $activityTypeID = CRM_Core_PseudoConstant::getKey('CRM_Activity_BAO_Activity', 'activity_type_id', 'Mass SMS'
-          );
-        }
-        else {
-          $activityTypeID = CRM_Core_PseudoConstant::getKey('CRM_Activity_BAO_Activity', 'activity_type_id', 'Bulk Email');
-        }
-        if (!$activityTypeID) {
-          throw new CRM_Core_Exception(ts('No relevant activity type found when recording Mailing Event delivered Activity'));
-        }
+        throw new CRM_Core_Exception(ts('No relevant activity type found when recording Mailing Event delivered Activity'));
       }
 
-      $activity = [
-        'source_contact_id' => $mailing->scheduled_id,
-        'activity_type_id' => $activityTypeID,
-        'source_record_id' => $this->mailing_id,
-        'activity_date_time' => $job_date,
-        'subject' => $mailing->subject,
-        'status_id' => 'Completed',
-        'campaign_id' => $mailing->campaign_id,
-      ];
-
-      //check whether activity is already created for this mailing.
-      //if yes then create only target contact record.
-      $query = "
-SELECT id
-FROM   civicrm_activity
-WHERE  civicrm_activity.activity_type_id = %1
-AND    civicrm_activity.source_record_id = %2
-";
-
-      $queryParams = [
-        1 => [$activityTypeID, 'Integer'],
-        2 => [$this->mailing_id, 'Integer'],
-      ];
-      $activityID = CRM_Core_DAO::singleValueQuery($query, $queryParams);
       $targetRecordID = CRM_Core_PseudoConstant::getKey('CRM_Activity_BAO_ActivityContact', 'record_type_id', 'Activity Targets');
 
       $activityTargets = [];
       foreach ($targetParams as $id) {
         $activityTargets[$id] = ['contact_id' => (int) $id];
       }
-      if ($activityID) {
-        $activity['id'] = $activityID;
 
-        // CRM-9519
-        if (CRM_Core_BAO_Email::isMultipleBulkMail()) {
-          // make sure we don't attempt to duplicate the target activity
-          // @todo - we don't have to do one contact at a time....
-          foreach ($activityTargets as $key => $target) {
-            $sql = "
+      // Cache the activity ID per mailing so the activity is created once
+      // per mailing and reused for subsequent batches in the same process.
+      $cachedActivityID = \Civi::$statics[__METHOD__]['cachedActivityID'][$this->mailing_id] ?? NULL;
+
+      if ($cachedActivityID === NULL) {
+        $activity = [
+          'source_contact_id' => $mailing->scheduled_id,
+          'activity_type_id' => $activityTypeID,
+          'source_record_id' => $this->mailing_id,
+          'activity_date_time' => $job_date,
+          'subject' => $mailing->subject,
+          'status_id' => 'Completed',
+          'campaign_id' => $mailing->campaign_id,
+        ];
+
+        //check whether activity is already created for this mailing.
+        //if yes then create only target contact record.
+        $query = "
 SELECT id
-FROM   civicrm_activity_contact
-WHERE  activity_id = $activityID
-AND    contact_id = {$target['contact_id']}
-AND    record_type_id = $targetRecordID
+FROM   civicrm_activity
+WHERE  civicrm_activity.activity_type_id = %1
+AND    civicrm_activity.source_record_id = %2
 ";
-            if (CRM_Core_DAO::singleValueQuery($sql)) {
-              unset($activityTargets[$key]);
-            }
-          }
+
+        $queryParams = [
+          1 => [$activityTypeID, 'Integer'],
+          2 => [$this->mailing_id, 'Integer'],
+        ];
+        $existingActivityID = CRM_Core_DAO::singleValueQuery($query, $queryParams);
+
+        if ($existingActivityID) {
+          $activity['id'] = $existingActivityID;
+        }
+
+        try {
+          $activityResult = civicrm_api3('Activity', 'create', $activity);
+          $cachedActivityID = $activityResult['id'];
+          \Civi::$statics[__METHOD__]['cachedActivityID'][$this->mailing_id] = $cachedActivityID;
+        }
+        catch (Exception $e) {
+          $result = FALSE;
         }
       }
 
-      try {
-        $activity = civicrm_api3('Activity', 'create', $activity);
-        ActivityContact::save(FALSE)->setRecords($activityTargets)->setDefaults(['activity_id' => $activity['id'], 'record_type_id' => $targetRecordID])->execute();
-      }
-      catch (Exception $e) {
-        $result = FALSE;
+      if ($cachedActivityID && !empty($activityTargets)) {
+        // CRM-9519
+        if (CRM_Core_BAO_Email::isMultipleBulkMail()) {
+          // Remove targets that already have an activity contact record.
+          $existingContactIds = [];
+          $contactIdList = implode(',', array_column($activityTargets, 'contact_id'));
+          if ($contactIdList) {
+            $sql = "
+SELECT contact_id
+FROM   civicrm_activity_contact
+WHERE  activity_id = {$cachedActivityID}
+AND    contact_id IN ({$contactIdList})
+AND    record_type_id = {$targetRecordID}
+";
+            $dao = CRM_Core_DAO::executeQuery($sql);
+            while ($dao->fetch()) {
+              $existingContactIds[$dao->contact_id] = TRUE;
+            }
+            foreach ($activityTargets as $key => $target) {
+              if (isset($existingContactIds[$target['contact_id']])) {
+                unset($activityTargets[$key]);
+              }
+            }
+          }
+        }
+
+        try {
+          ActivityContact::save(FALSE)->setRecords($activityTargets)->setDefaults(['activity_id' => $cachedActivityID, 'record_type_id' => $targetRecordID])->execute();
+        }
+        catch (Exception $e) {
+          $result = FALSE;
+        }
       }
 
       $targetParams = [];

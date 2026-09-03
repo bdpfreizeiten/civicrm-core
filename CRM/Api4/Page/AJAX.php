@@ -144,7 +144,12 @@ class CRM_Api4_Page_AJAX extends CRM_Core_Page {
   private function execute(string $entity, string $action, array $params = [], $index = NULL) {
     $response = [];
     try {
-      $params['checkPermissions'] = TRUE;
+      // Do not allow permissions to be disabled by ajax callers
+      foreach (array_keys($params) as $key) {
+        if (strtolower($key) === 'checkpermissions') {
+          unset($params[$key]);
+        }
+      }
       // Handle numeric indexes later so we can get the count
       $itemAt = CRM_Utils_Type::validate($index, 'Integer', FALSE);
       $result = civicrm_api4($entity, $action, $params, isset($itemAt) ? NULL : $index);
@@ -154,6 +159,11 @@ class CRM_Api4_Page_AJAX extends CRM_Core_Page {
       foreach (get_class_vars(get_class($result)) as $key => $val) {
         $response[$key] = $result->$key;
       }
+      // Add error data from Result object
+      $response['errors'] = $result->getErrors();
+      $response['max_error_level'] = $result->getMaxErrorLevel();
+      $response['is_blocking_error'] = $result->isBlockingError();
+
       unset($response['rowCount']);
       $response['count'] = $result->count();
       $response['countFetched'] = $result->countFetched();
@@ -168,16 +178,7 @@ class CRM_Api4_Page_AJAX extends CRM_Core_Page {
         \Civi\API\Exception\UnauthorizedException::class => 403,
       ];
       $status = $statusMap[get_class($e)] ?? 500;
-
       $errorId = CRM_Core_Error::createErrorId();
-      $logMessage = "AJAX Error ({$errorId}): {$e->getMessage()}";
-      $logContext = ['error_id' => $errorId, 'exception' => $e];
-      if ($status === 500) {
-        \Civi::log()->error($logMessage, $logContext);
-      }
-      else {
-        \Civi::log()->warning($logMessage, $logContext);
-      }
 
       // Send error code (but don't overwrite success code if there are multiple calls and one was successful)
       $this->httpResponseCode = $this->httpResponseCode ?: $status;
@@ -207,6 +208,30 @@ class CRM_Api4_Page_AJAX extends CRM_Core_Page {
         ]);
       }
       $response['status'] = $status;
+
+      // Detect if it's an afform validation error and format it in a way
+      // that ext/afform/core/ang/af/afForm.component.js can handle it
+      $bFormError = FALSE;
+      if (method_exists($e, 'getErrorData')) {
+        $errorData = $e->getErrorData();
+        if (!empty($errorData['validation'])) {
+          $response['error_code'] = (string) $error_data['error_code'] ?? '1';
+          $response['error_message'] = implode("\n", $errorData['validation']);
+          $bFormError = TRUE;
+        }
+      }
+
+      // Send error to the logs if it's not a form validation issue
+      if (!$bFormError) {
+        $logMessage = "AJAX Error ({$errorId}): {$e->getMessage()}";
+        $logContext = ['error_id' => $errorId, 'exception' => $e];
+        if ($status === 500) {
+          \Civi::log()->error($logMessage, $logContext);
+        }
+        else {
+          \Civi::log()->warning($logMessage, $logContext);
+        }
+      }
     }
     return $response;
   }

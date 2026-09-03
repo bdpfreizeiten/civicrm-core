@@ -37,7 +37,7 @@ class Revert extends \Civi\Api4\Generic\BasicBatchAction {
       \CRM_Core_ManagedEntities::singleton()->reconcile(E::LONG_NAME);
     }
     if ($this->flushMenu) {
-      \CRM_Core_Menu::store();
+      \CRM_Core_Menu::clear();
     }
   }
 
@@ -47,6 +47,9 @@ class Revert extends \Civi\Api4\Generic\BasicBatchAction {
    * @inheritDoc
    */
   protected function doTask($item) {
+    // Dispatch hook_civicrm_pre
+    \CRM_Utils_Hook::pre('delete', 'Afform', NULL, $item);
+
     /** @var \CRM_Afform_AfformScanner $scanner */
     $scanner = \Civi::service('afform_scanner');
     $files = [
@@ -74,6 +77,11 @@ class Revert extends \Civi\Api4\Generic\BasicBatchAction {
     if (Utils::shouldClearMenuCache($item, $original)) {
       $this->flushMenu = TRUE;
     }
+
+    // Dispatch hook_civicrm_post
+    // param $object is passed by reference
+    $nullValue = NULL;
+    \CRM_Utils_Hook::post('delete', 'Afform', 0, $nullValue, $item);
 
     return $item;
   }

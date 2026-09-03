@@ -171,7 +171,7 @@ abstract class AbstractAction implements \ArrayAccess {
    * @throws \Exception
    */
   public function __set($name, $value) {
-    throw new \CRM_Core_Exception('Unknown api parameter');
+    throw new \CRM_Core_Exception('Unknown api parameter ' . $name);
   }
 
   /**
@@ -183,6 +183,16 @@ abstract class AbstractAction implements \ArrayAccess {
     if ($val !== 4 && $val !== '4') {
       throw new \CRM_Core_Exception('Cannot modify api version');
     }
+    return $this;
+  }
+
+  public function set(string $param, $value) {
+    // Strictly enforce api params
+    if (!$this->paramExists($param)) {
+      throw new \CRM_Core_Exception("Unknown api parameter: $param");
+    }
+    $setter = 'set' . ucfirst($param);
+    $this->$setter($value);
     return $this;
   }
 
@@ -318,6 +328,10 @@ abstract class AbstractAction implements \ArrayAccess {
     return $param ? $this->_paramInfo[$param] : $this->_paramInfo;
   }
 
+  public function getUiParams(): array {
+    return [];
+  }
+
   /**
    * @return string
    */
@@ -449,13 +463,27 @@ abstract class AbstractAction implements \ArrayAccess {
    * This is because we DON'T want the wrapper to check permissions as this is an internal op.
    * @see \Civi\Api4\Action\Contact\GetFields
    *
+   * @param string|null $entityName
+   * @param string|null $actionName
+   *
    * @throws \CRM_Core_Exception
    * @return array
    */
-  public function entityFields() {
-    $entityName = $this->getEntityName();
-    $actionName = $this->getActionName();
-    if (empty(\Civi::$statics['Api4EntityFields'][$entityName][$actionName])) {
+  public function entityFields(?string $entityName = NULL, ?string $actionName = NULL) {
+    $entityName = $entityName ?? $this->getEntityName();
+    $actionName = $actionName ?? $this->getActionName();
+
+    $dynamicValues = [];
+    foreach ($this->getParamInfo() as $paramName => $info) {
+      if (!empty($info['dynamicFieldControl']) && isset($this->$paramName)) {
+        $dynamicValues[$paramName] = $this->$paramName;
+      }
+    }
+    ksort($dynamicValues);
+    $dynamicKey = empty($dynamicValues) ? '' : serialize($dynamicValues);
+    $cacheKey = "{$entityName}::{$actionName}::{$dynamicKey}";
+
+    if (empty(\Civi::$statics['Api4EntityFields'][$cacheKey])) {
       $allowedTypes = ['Field', 'Filter', 'Extra'];
       $getFields = \Civi\API\Request::create($entityName, 'getFields', [
         'version' => 4,
@@ -463,12 +491,17 @@ abstract class AbstractAction implements \ArrayAccess {
         'action' => $actionName,
         'where' => [['type', 'IN', $allowedTypes]],
       ]);
+      foreach ($dynamicValues as $paramName => $val) {
+        if ($getFields->paramExists($paramName)) {
+          $getFields->{"set" . ucfirst($paramName)}($val);
+        }
+      }
       $result = new Result();
       // Pass TRUE for the private $isInternal param
       $getFields->_run($result, TRUE);
-      \Civi::$statics['Api4EntityFields'][$entityName][$actionName] = (array) $result->indexBy('name');
+      \Civi::$statics['Api4EntityFields'][$cacheKey] = (array) $result->indexBy('name');
     }
-    return \Civi::$statics['Api4EntityFields'][$entityName][$actionName];
+    return \Civi::$statics['Api4EntityFields'][$cacheKey];
   }
 
   /**
@@ -528,16 +561,18 @@ abstract class AbstractAction implements \ArrayAccess {
    * Replaces pseudoconstants in input values
    *
    * @param array $record
+   * @param string|null $entityName
+   * @param string|null $actionName
    * @throws \CRM_Core_Exception
    */
-  protected function formatWriteValues(&$record) {
+  protected function formatWriteValues(&$record, ?string $entityName = NULL, ?string $actionName = NULL) {
     $optionFields = [];
     // Collect fieldnames with a :pseudoconstant suffix & remove them from $record array
     foreach (array_keys($record) as $expr) {
       $suffix = strrpos($expr, ':');
       if ($suffix) {
         $fieldName = substr($expr, 0, $suffix);
-        $field = $this->entityFields()[$fieldName] ?? NULL;
+        $field = $this->entityFields($entityName, $actionName)[$fieldName] ?? NULL;
         if ($field) {
           $optionFields[$fieldName] = [
             'val' => $record[$expr],

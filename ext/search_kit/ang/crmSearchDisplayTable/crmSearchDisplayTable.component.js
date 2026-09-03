@@ -144,8 +144,8 @@
           headerClasses.push(column.alignment);
         }
         // Include unconditional css rules
-        if (column.cssRules) {
-          column.cssRules.forEach(function (cssRule) {
+        if (Array.isArray(column.cssRules)) {
+          column.cssRules.forEach(cssRule => {
             if (cssRule.length === 1) {
               headerClasses.push(cssRule[0]);
             }
@@ -155,7 +155,7 @@
       };
 
       this.getRowClass = function (row) {
-        let cssClass = row.cssClass || '';
+        let cssClass = '';
         if (ctrl.settings.hierarchical) {
           cssClass += ' crm-hierarchical-row crm-hierarchical-depth-' + row.data._depth;
           if (row.data._depth) {
@@ -229,6 +229,13 @@
         this.toggleColumns();
       };
 
+      this.clearColumnToggles = () => {
+        this.columns.forEach((col, index) => {
+          this.columns[index].enabled = false;
+        });
+        this.toggleColumns();
+      };
+
       /**
        * Keep track of which columns we have fetched each
        * time we fetch results. This allows us to only
@@ -239,6 +246,17 @@
         this.columns.forEach((col) => {
           col.fetched = col.enabled;
         });
+      };
+
+      this.onToggleDisclosure = (col, event) => {
+        col.hasBeenOpened = true;
+        const detailsElement = event.target.closest('details.crm-search-display-subsearch-dropdown');
+        // If we are opening a dropdown, close any others in the same search display
+        if (detailsElement && !detailsElement.open) {
+          detailsElement.closest('.crm-search-display-table')
+            .querySelectorAll('details.crm-search-display-subsearch-dropdown[open]')
+            .forEach((details) => details.open = false);
+        }
       };
 
     }

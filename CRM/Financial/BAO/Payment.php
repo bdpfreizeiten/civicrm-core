@@ -175,7 +175,6 @@ class CRM_Financial_BAO_Payment {
         }
         CRM_Contribute_BAO_Contribution::completeOrder([
           'is_email_receipt' => $params['is_send_contribution_notification'],
-          'trxn_date' => $params['trxn_date'],
           'payment_instrument_id' => $paymentTrxnParams['payment_instrument_id'],
           'payment_processor_id' => $paymentTrxnParams['payment_processor_id'] ?? '',
         ], $contributionBAO->contribution_recur_id, $contribution['id'], TRUE, $disableActionsOnCompleteOrder);
@@ -233,7 +232,7 @@ class CRM_Financial_BAO_Payment {
     $contributionDAO->id = $contributionID;
     $contributionDAO->find(TRUE);
     if (isset($params['fee_amount'])) {
-      // Update contribution.fee_amount to be be the total of all fees
+      // Update contribution.fee_amount to be the total of all fees
       // since the payment is already saved the total here will be right.
       $payments = civicrm_api3('Payment', 'get', [
         'contribution_id' => $contributionID,
@@ -478,24 +477,24 @@ class CRM_Financial_BAO_Payment {
    */
   protected static function getPayableItems(array $params, array $contribution): array {
     $outstandingBalance = $contribution['balance_amount'];
+    $params['total_amount'] = floatval($params['total_amount']);
+    $isARefund = FALSE;
+
     if ($outstandingBalance !== 0.0) {
+      // Contribution has an outstanding balance
       $ratio = $params['total_amount'] / $outstandingBalance;
     }
     elseif ($params['total_amount'] < 0) {
+      // We are recording a refund
+      $isARefund = TRUE;
       $ratio = $params['total_amount'] / $contribution['paid_amount'];
     }
     else {
       // Help we are making a payment but no money is owed. We won't allocate the overpayment to any line item.
       $ratio = 0;
     }
-    $lineItemOverrides = [];
-    if (!empty($params['line_item'])) {
-      // The format is a bit weird here - $params['line_item'] => [[1 => 10], [2 => 40]]
-      // Squash to [1 => 10, 2 => 40]
-      foreach ($params['line_item'] as $lineItem) {
-        $lineItemOverrides += $lineItem;
-      }
-    }
+
+    $isPaymentCompletesContribution = self::isPaymentCompletesContribution($params['contribution_id'], $params['total_amount'], '');
 
     $items = LineItem::get(FALSE)
       ->addSelect('*', 'financial_item.status_id:name', 'financial_item.id', 'financial_item.financial_account_id', 'financial_item_id.currency', 'financial_item.financial_account_id.is_tax', 'financial_item.entity_id', 'financial_item.amount', 'allocated.amount')
@@ -517,7 +516,41 @@ class CRM_Financial_BAO_Payment {
       ->addWhere('contribution_id', '=', (int) $params['contribution_id'])
       ->execute();
 
+    // If we have specified lineItem amount allocations check and process them here.
+    $lineItemAllocations = [];
+    if (!empty($params['line_item_allocation'])) {
+      // Get just a list of lineItemIDs so we can check the allocations are for valid lineItems on the Contribution.
+      $lineItemIDs = LineItem::get(FALSE)
+        ->addSelect('id')
+        ->addWhere('contribution_id', '=', (int) $params['contribution_id'])
+        ->execute()
+        ->column('id', 'id');
+      if (!empty(array_diff_key($params['line_item_allocation'], $lineItemIDs))) {
+        throw new CRM_Core_Exception('Cannot allocate line items that do not exist on the contribution');
+      }
+      // Format: lineItemID => Amount to allocate: Eg. [1 => 10, 2 => 40]
+      $overrideAmount = 0.0;
+      foreach ($params['line_item_allocation'] as $lineItemID => $lineItemAmount) {
+        $lineItemAmount = floatval($lineItemAmount);
+        $overrideAmount += $lineItemAmount;
+        if ($isARefund) {
+          if ($lineItemAmount > 0) {
+            throw new CRM_Core_Exception('Cannot allocate a positive amount when processing a refund');
+          }
+          elseif ($contribution['paid_amount'] <= 0) {
+            throw new CRM_Core_Exception('Cannot allocate a refund when the paid amount is <= 0');
+          }
+        }
+        $lineItemAllocations[$lineItemID] = $lineItemAmount;
+      }
+      // Total for overrides must match $params['total_amount']
+      if ($overrideAmount !== $params['total_amount']) {
+        throw new CRM_Core_Exception('LineItem allocations must add up to the total amount');
+      }
+    }
+
     $payableItems = [];
+    $payableItemIndex = NULL;
 
     foreach ($items as $item) {
       $lineItemID = $item['id'];
@@ -535,18 +568,65 @@ class CRM_Financial_BAO_Payment {
       $item['paid'] = ($item['allocated.amount'] ?: 0) + ($payableItems[$payableItemIndex]['paid'] ?? 0);
       $item['item_total'] = $item['financial_item.financial_account_id.is_tax'] ? $item['tax_amount'] : $item['line_total'];
       $item['balance'] = $item['item_total'] - $item['paid'];
-      if (!empty($lineItemOverrides)) {
-        $item['allocation'] = $lineItemOverrides[$lineItemID] ?? NULL;
+      if (!empty($lineItemAllocations)) {
+        // @fixme: Need to handle tax here.
+        // Eg. an allocation of 50 for the following:
+        // 375: 35, 375-tax: 15 reverse allocates 50 onto both...
+        if (empty($lineItemAllocations[$lineItemID])) {
+          $item['allocation'] = 0.0;
+        }
+        else {
+          $item['allocation'] = $lineItemAllocations[$lineItemID];
+          if (!empty($item['tax_amount'])) {
+            // We have a tax_amount so need to allocate between amount and tax_amount.
+            // Items have already been split so we have an item for amount + for tax.
+            // Passing in 6. Should end up with 5 for line + 1 for tax
+
+            $taxRatio = $lineItemAllocations[$lineItemID] / ($item['line_total'] + $item['tax_amount']);
+            if ($item['financial_item.financial_account_id.is_tax']) {
+              $item['allocation'] = $item['tax_amount'] * $taxRatio;
+            }
+            else {
+              $item['allocation'] = $item['line_total'] * $taxRatio;
+            }
+          }
+        }
       }
       else {
         if (empty($item['balance']) && !empty($ratio) && $params['total_amount'] < 0) {
-          $item['allocation'] = $item['item_total'] * $ratio;
+          $item['allocation'] = round($item['item_total'] * $ratio, 2);
+        }
+        elseif ($isPaymentCompletesContribution) {
+          $item['allocation'] = $item['balance'];
         }
         else {
-          $item['allocation'] = $item['balance'] * $ratio;
+          $item['allocation'] = round($item['balance'] * $ratio, 2);
         }
       }
       $payableItems[$payableItemIndex] = $item;
+    }
+
+    if (empty($lineItemAllocations) && !empty($ratio) && isset($payableItems[$payableItemIndex])) {
+      $totalTaxAllocation = 0;
+      $totalAllocation = 0;
+      $lastNonTaxKey = $payableItemIndex;
+
+      foreach ($payableItems as $key => $item) {
+        if ($item['financial_item.financial_account_id.is_tax']) {
+          $totalTaxAllocation += $item['allocation'];
+        }
+        else {
+          $totalAllocation += $item['allocation'];
+          $lastNonTaxKey = $key;
+        }
+      }
+
+      $total = $totalTaxAllocation + $totalAllocation;
+      $leftPayment = $params['total_amount'] - $total;
+
+      if ($lastNonTaxKey !== NULL && $leftPayment > 0) {
+        $payableItems[$lastNonTaxKey]['allocation'] += $leftPayment;
+      }
     }
 
     return $payableItems;
@@ -608,7 +688,7 @@ class CRM_Financial_BAO_Payment {
   protected static function createFinancialItem(array $lineItem, string $trxn_date, int $contactID, string $currency): array {
     $financialAccount = CRM_Financial_BAO_FinancialAccount::getFinancialAccountForFinancialTypeByRelationship(
       $lineItem['financial_type_id'],
-      'Income Account Is'
+      'Income Account is'
     );
 
     FinancialItem::create(FALSE)

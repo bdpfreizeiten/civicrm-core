@@ -7,6 +7,7 @@ use Civi\Afform\Event\AfformPrefillEvent;
 use Civi\Afform\Event\AfformSubmitEvent;
 use Civi\Afform\FormDataModel;
 use Civi\API\Exception\UnauthorizedException;
+use Civi\Api4\AfformSubmission;
 use Civi\Api4\File;
 use Civi\Api4\Generic\Result;
 use Civi\Api4\Utils\CoreUtil;
@@ -48,6 +49,13 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
    * @var array
    */
   protected $_afform;
+
+  /**
+   * Contact id resolved by getSubmitterContactID(), or FALSE before it has been resolved.
+   *
+   * @var int|null|false
+   */
+  private $_submitterContactId = FALSE;
 
   /**
    * @var \Civi\Afform\FormDataModel
@@ -143,6 +151,53 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
   }
 
   /**
+   * Id of the stored submission being completed, if this is not a fresh submission.
+   *
+   * @return int|null
+   */
+  protected function getSubmissionId() {
+    return $this->args['sid'] ?? NULL;
+  }
+
+  /**
+   * Contact id that this form is being filled in on behalf of.
+   *
+   * Normally the logged-in user, but a stored submission is completed by someone else -
+   * an admin processing a form held back for manual processing, or the anonymous request
+   * behind an email-verification link. The values in it belong to the contact who
+   * submitted it, so resolving to whoever is processing it writes their answers onto the
+   * wrong contact.
+   *
+   * The lookup inherits this action's permission setting, so an untrusted request cannot
+   * act as another contact by passing their submission id.
+   *
+   * @return int|null
+   */
+  public function getSubmitterContactID(): ?int {
+    if ($this->_submitterContactId === FALSE) {
+      $submissionId = $this->getSubmissionId();
+      if (!$submissionId) {
+        $this->_submitterContactId = \CRM_Core_Session::getLoggedInContactID() ?: NULL;
+      }
+      else {
+        $submission = AfformSubmission::get($this->getCheckPermissions())
+          ->addSelect('contact_id')
+          ->addWhere('id', '=', $submissionId)
+          ->addWhere('afform_name', '=', $this->name)
+          ->execute()->first();
+        // Falling back to the current user here would write the submitted values onto
+        // whoever is processing the form, so refuse rather than act as the wrong contact
+        if (!$submission) {
+          throw new UnauthorizedException(E::ts('Submission %1 is not available to process.', [1 => $submissionId]));
+        }
+        // An anonymous submission has no contact, so nothing is autofilled
+        $this->_submitterContactId = $submission['contact_id'] ?: NULL;
+      }
+    }
+    return $this->_submitterContactId;
+  }
+
+  /**
    * Load all entities
    */
   protected function loadEntities() {
@@ -153,15 +208,19 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
     // When loading the whole form, process every entity in order of dependencies.
     // also when filling a single entity from an autocomplete, as that may affect other entities.
     else {
-      $sorter = new AfformEntitySortEvent($this->_afform, $this->_formDataModel, $this);
-      \Civi::dispatcher()->dispatch('civi.afform.sort.prefill', $sorter);
-      $entityNames = $sorter->getSortedEnties();
+      $sortEvent = new AfformEntitySortEvent($this->_afform, $this->_formDataModel, $this);
+      \Civi::dispatcher()->dispatch('civi.afform.sort.prefill', $sortEvent);
+      $entityNames = $sortEvent->getSorted();
     }
 
     foreach ($entityNames as $entityName) {
       $ids = (array) ($this->args[$entityName] ?? []);
 
       $entity = $this->_formDataModel->getEntity($entityName);
+      if (!$entity['type']) {
+        // E.g. the 'extra' entity.
+        continue;
+      }
       $this->_entityIds[$entityName] = [];
       $idField = CoreUtil::getIdFieldName($entity['type']);
 
@@ -235,7 +294,7 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
 
     // Limit number of records based on af-repeat settings
     // If 'min' is set then it is repeatable, and max will either be a number or NULL for unlimited.
-    if (isset($entity['min']) && isset($entity['max'])) {
+    if (isset($entity['min'], $entity['max'])) {
       $values = array_slice($values, 0, $entity['max'], TRUE);
     }
     $matchField = self::getNestedKey($values);
@@ -406,8 +465,8 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
     return ($afEntity['security'] === 'FBAC' || \CRM_Core_Permission::check('access uploaded files'));
   }
 
-  protected static function getFileFields($entityName, $entityFields): array {
-    if (!$entityFields) {
+  protected static function getFileFields(?string $entityName, array $entityFields): array {
+    if (!$entityFields || !$entityName) {
       return [];
     }
     return civicrm_api4($entityName, 'getFields', [
@@ -563,7 +622,7 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
   /**
    * @return string
    */
-  public function getName():string {
+  public function getName(): ?string {
     return $this->name;
   }
 
@@ -635,6 +694,9 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
           $item = array_merge(($val ?? []), $idData);
           $combined[$name][$idx] = $item;
         }
+        else {
+          $combined[$name][$idx] = $val;
+        }
       }
     }
     return $combined;
@@ -651,9 +713,19 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
       $submittableFields = $this->getSubmittableFields($entity['fields']);
       $fileFields = $this->getFileFields($entity['type'], $submittableFields);
       foreach ($submittedValues[$entityName] ?? [] as $values) {
-        // Use default values from DisplayOnly fields + submittable fields on the form
+        if (!is_array($values)) {
+          // For "extra" we might have $values['fields'] if we added any extra fields.
+          // But, if we have eg. recaptcha we will have $values['recaptcha2'] and might
+          //   not have $values['fields']. The below code **requires** $values['fields']
+          //   and must be run to pass the extra field values through to submit etc.
+          continue;
+        }
+        // Use default values from DisplayOnly fields + submittable fields on the form.
+        // Hidden field defaults are appended last so they only fill fields the
+        // client omitted (submitted values take precedence over them).
         $values['fields'] = $this->getForcedDefaultValues($entity['fields']) +
-          array_intersect_key($values['fields'] ?? [], $submittableFields);
+          array_intersect_key($values['fields'] ?? [], $submittableFields) +
+          $this->getHiddenDefaultValues($entity['fields']);
         // Special handling for file fields
         foreach ($fileFields as $fileFieldName) {
           if (isset($values['fields'][$fileFieldName]) && is_array($values['fields'][$fileFieldName])) {
@@ -668,7 +740,7 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
           }
         }
         // Only accept joins set on the form
-        $values['joins'] = array_intersect_key($values['joins'] ?? [], $entity['joins']);
+        $values['joins'] = array_intersect_key($values['joins'] ?? [], $entity['joins'] ?? []);
         foreach ($values['joins'] as $joinEntity => &$joinValues) {
           // Only accept values from join fields on the form
           $idField = CoreUtil::getIdFieldName($joinEntity);
@@ -687,6 +759,8 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
             // As with the main entity, use default values from DisplayOnly fields + values from submittable fields
             $joinValues[$index] = $this->getForcedDefaultValues($entity['joins'][$joinEntity]['fields'] ?? []);
             $joinValues[$index] += array_intersect_key($vals, $allowedFields);
+            // Fill in Hidden field defaults the client omitted (does not override submitted values)
+            $joinValues[$index] += $this->getHiddenDefaultValues($entity['joins'][$joinEntity]['fields'] ?? []);
             // Unset prefilled file fields
             foreach ($fileFields as $fileFieldName) {
               if (isset($joinValues[$index][$fileFieldName]) && is_array($joinValues[$index][$fileFieldName])) {
@@ -767,11 +841,31 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
   }
 
   /**
+   * Get default values from Hidden fields
+   *
+   * @param array $fields
+   * @return array
+   */
+  protected function getHiddenDefaultValues(array $fields): array {
+    $values = [];
+    foreach ($fields as $field) {
+      $inputType = $field['defn']['input_type'] ?? NULL;
+      if ($inputType === 'Hidden' && isset($field['defn']['afform_default'])) {
+        $values[$field['name']] = $field['defn']['afform_default'];
+      }
+    }
+    return $values;
+  }
+
+  /**
    * Process form data
    */
   public function processFormData(array $entityValues) {
-    $entityWeights = \Civi\Afform\Utils::getEntityWeights($this->_formDataModel->getEntities(), $entityValues);
-    foreach ($entityWeights as $entityName) {
+    $sortEvent = new AfformEntitySortEvent($this->_afform, $this->_formDataModel, $this, $entityValues);
+    \Civi::dispatcher()->dispatch('civi.afform.sort.submit', $sortEvent);
+    $sortedEntityNames = $sortEvent->getSorted();
+
+    foreach ($sortedEntityNames as $entityName) {
       $entityType = $this->_formDataModel->getEntity($entityName)['type'];
       $records = $this->replaceReferences($entityName, $entityValues[$entityName]);
       $this->fillIdFields($records, $entityName);
@@ -868,7 +962,9 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
   /**
    * Function to replace tokens with entity values in e.g. redirect urls
    *
-   * Tokens look like [Participant1.0.id]
+   * Most tokens look like [Participant1.0.id]
+   *
+   * Except for special case of JWT submission token [token]
    *
    * @param string $text
    *
@@ -876,7 +972,7 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
    */
   public function replaceTokens(string $text): string {
     $matches = [];
-    preg_match_all('/[[a-zA-Z0-9_]{1,}\.[0-9]{1,}\.[^]]+]/', $text, $matches);
+    preg_match_all('/\[[a-zA-Z0-9_]+\.[0-9]+\.[^]]+]/', $text, $matches);
 
     foreach ($matches[0] as $match) {
       // strip [ ] and split on .
@@ -892,6 +988,9 @@ abstract class AbstractProcessor extends \Civi\Api4\Generic\AbstractAction {
       }
       $text = str_replace($match, $value, $text);
     }
+
+    // handle special case of JWT token token
+    $text = str_replace('[token]', $this->_response['token'] ?? '', $text);
 
     return $text;
   }

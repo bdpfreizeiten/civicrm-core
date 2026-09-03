@@ -10,7 +10,7 @@ return [
     'default' => 'light',
     'html_type' => 'select',
     'add' => 1.0,
-    'title' => E::ts('Backend Dark Mode Control'),
+    'title' => E::ts('Backend Dark Mode Setting'),
     'is_domain' => 1,
     'is_contact' => 0,
     'help_text' => E::ts('Control whether and how dark mode can be activated (for supported Riverlea themes only).'),
@@ -20,9 +20,26 @@ return [
       'dark' => E::ts('Always use dark mode'),
     ],
     'settings_pages' => [
-      'riverlea' => ['weight' => 100],
-      // show alongside backend theme selector on Display settings page
-      'display' => ['section' => 'theme', 'weight' => 20],
+      'theme' => ['weight' => 110],
+    ],
+  ],
+  'riverlea_user_controls_backend' => [
+    'name' => 'riverlea_user_controls_backend',
+    'group' => 'riverlea',
+    'type' => 'Array',
+    'default' => [],
+    'html_type' => 'checkboxes',
+    'title' => E::ts('Backend User Controls'),
+    'is_domain' => 1,
+    'is_contact' => 0,
+    'help_text' => E::ts('Enable users to tweak the theme to their preferences.'),
+    'options' => [
+      // TODO: add other controls
+      'dark-mode' => E::ts('Dark-mode'),
+      //'font-size' => E::ts('Font size'),
+    ],
+    'settings_pages' => [
+      'theme' => ['weight' => 210],
     ],
   ],
   'riverlea_dark_mode_frontend' => [
@@ -32,7 +49,7 @@ return [
     'default' => 'light',
     'html_type' => 'select',
     'add' => 1.0,
-    'title' => E::ts('Frontend Dark Mode Control'),
+    'title' => E::ts('Frontend Dark Mode Setting'),
     'is_domain' => 1,
     'is_contact' => 0,
     'help_text' => E::ts('Control whether and how dark mode can be activated (for supported Riverlea themes only).'),
@@ -42,35 +59,7 @@ return [
       'dark' => E::ts('Always use dark mode'),
     ],
     'settings_pages' => [
-      'riverlea' => ['weight' => 110],
-      // show alongside frontend theme selector on Display settings page
-      'display' => ['section' => 'theme', 'weight' => 40],
-    ],
-  ],
-  'riverlea_font_size' => [
-    'name' => 'riverlea_font_size',
-    'group' => 'riverlea',
-    'default' => '1',
-    'type' => 'String',
-    'html_type' => 'select',
-    'add' => 1.0,
-    'options' => [
-      '0.75' => E::ts('Smallest'),
-      '0.875' => E::ts('Small'),
-      '1' => E::ts('Default'),
-      '1.125' => E::ts('Big'),
-      '1.5' => E::ts('Bigger'),
-    ],
-    'on_change' => [
-      '\\Civi\\Riverlea\\StyleLoader::onChangeFontsize',
-    ],
-    'validate_callback' => '\\Civi\\Riverlea\\StyleLoader::validateFontsize',
-    'title' => E::ts('Font size'),
-    'is_domain' => 1,
-    'is_contact' => 0,
-    'help_text' => E::ts('For systems where 1rem = 16px (which is the default in RiverLea and all browsers) these sizes represent: Smallest 12px, Small 14px, Default 16px, Big 18px, Bigger 24px.'),
-    'settings_pages' => [
-      'riverlea' => ['weight' => 500],
+      'theme' => ['weight' => 210],
     ],
   ],
 ];

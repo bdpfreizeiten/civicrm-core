@@ -72,17 +72,31 @@ class SubmitFile extends AbstractProcessor {
       $entityId = $this->getEntityId();
     }
 
+    $fileField = $this->_formDataModel->getField($this->getEntityApiName(), $this->fieldName, 'create');
+
     $file = civicrm_api4('File', 'create', [
       'values' => [
         'mime_type' => $_FILES['file']['type'],
         'file_name' => $_FILES['file']['name'],
         'move_file' => $_FILES['file']['tmp_name'],
+        'is_public' => $fileField['input_attrs']['file_is_public'] ?? FALSE,
       ],
       'checkPermissions' => FALSE,
     ])->single();
 
     if ($this->isDraft()) {
       return $this->updateDraft($draft, $file['id']);
+    }
+    // Handle special case for image URL
+    elseif (isset($entityId) && $this->getFieldName() === 'image_URL') {
+      civicrm_api4('Contact', 'update', [
+        'checkPermissions' => FALSE,
+        'values' => [
+          'id' => $entityId,
+          'image_URL' => \CRM_Utils_System::url('civicrm/contact/imagefile', 'photo=' . $file['uri'], TRUE, NULL, TRUE, TRUE),
+        ],
+      ]);
+      return [];
     }
     else {
       return $this->updateEntity($entityId, $file['id']);
@@ -144,7 +158,8 @@ class SubmitFile extends AbstractProcessor {
       ],
       'checkPermissions' => FALSE,
     ]);
-    return [];
+    $fileInfo = $this->getFileInfo($fileId, $this->modelName);
+    return [$fileInfo];
   }
 
   private function getDraft(): array {

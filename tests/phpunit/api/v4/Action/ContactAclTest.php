@@ -26,6 +26,7 @@ use Civi\Api4\Email;
 use Civi\Api4\Individual;
 use Civi\Api4\LocationType;
 use Civi\Api4\Organization;
+use Civi\Api4\Phone;
 use Civi\Core\HookInterface;
 use Civi\Test\TransactionalInterface;
 
@@ -114,6 +115,27 @@ class ContactAclTest extends Api4TestBase implements TransactionalInterface, Hoo
     $this->assertEquals(array_slice($activity, 1), $allowedActivities->column('id'));
     // ACL clause should have been inserted once
     $this->assertEquals(1, substr_count($allowedActivities->debug['sql'][0], 'civicrm_acl_contact_cache'));
+
+    $error = NULL;
+    try {
+      Phone::create()
+        ->setValues(['contact_id' => $cid[0], 'phone' => '1234567890'])
+        ->execute();
+    }
+    catch (\Exception $e) {
+      $error = $e->getMessage();
+    }
+    $this->assertEquals('ACL check failed', $error);
+
+    $result = Phone::create()
+      ->setValues(['contact_id' => $cid[1], 'phone' => '1234567890'])
+      ->execute();
+    $this->assertCount(1, $result);
+
+    $result = Phone::get()
+      ->addWhere('contact_id', '=', $cid[1])
+      ->execute();
+    $this->assertCount(1, $result);
   }
 
   public function testContactAclClauseDedupe(): void {
@@ -166,6 +188,49 @@ class ContactAclTest extends Api4TestBase implements TransactionalInterface, Hoo
     $this->assertEquals(array_slice($email, 1), $locationTypeGet->column('email.id'));
     // ACL clause should have been inserted once
     $this->assertEquals(1, substr_count($locationTypeGet->debug['sql'][0], 'civicrm_acl_contact_cache'));
+  }
+
+  public function testAclCacheBuildDoubleChecksRetrieveUnderLock(): void {
+    $userID = $this->createLoggedInUser();
+
+    // 1. Setup mock Lock
+    $mockLock = $this->createMock(\Civi\Core\Lock\LockInterface::class);
+    $mockLock->expects($this->once())
+      ->method('release');
+
+    // Mock LockManager to return our custom mock Lock and populate DB when acquire is called
+    $mockLockManager = $this->createMock(\Civi\Core\Lock\LockManager::class);
+    $mockLockManager->expects($this->once())
+      ->method('acquire')
+      ->with("data.core.acl.{$userID}")
+      ->willReturnCallback(function () use ($userID, $mockLock) {
+        // Manually insert a mock ACL ID (999) to simulate a concurrent thread rebuilding the cache while we waited for the lock
+        \CRM_Core_DAO::executeQuery("INSERT INTO civicrm_acl_cache (acl_id, contact_id) VALUES (999, %1)", [
+          1 => [$userID, 'Integer'],
+        ]);
+        return $mockLock;
+      });
+
+    // Swap lockManager in Civi::$statics
+    $originalLockManager = \Civi::$statics['Civi\Core\Container']['boot']['lockManager'];
+    \Civi::$statics['Civi\Core\Container']['boot']['lockManager'] = $mockLockManager;
+
+    try {
+      // Clear caches
+      \CRM_ACL_BAO_Cache::resetCache();
+      \CRM_ACL_BAO_Cache::$_cache = NULL;
+
+      // Call build()
+      $acls = \CRM_ACL_BAO_Cache::build($userID);
+
+      // Verify that build() returned the double-checked database state [999 => 1]
+      // instead of rebuilding it (which would have returned the actual user's ACLs)
+      $this->assertEquals([999 => 1], $acls);
+    }
+    finally {
+      // Restore lockManager
+      \Civi::$statics['Civi\Core\Container']['boot']['lockManager'] = $originalLockManager;
+    }
   }
 
 }

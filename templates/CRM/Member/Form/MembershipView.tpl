@@ -40,7 +40,7 @@
         {if $owner_display_name}
             <tr><td class="label">{ts}By Relationship{/ts}</td><td>{$relationship}&nbsp;&nbsp;<a href="{crmURL p='civicrm/contact/view' q="reset=1&cid=$owner_contact_id&context=$context"}" title="{ts escape='htmlattribute'}View primary member contact summary{/ts}">{$owner_display_name}</a>&nbsp;</td></tr>
         {/if}
-        <tr><td class="label">{ts}Membership Type{/ts}</td><td>{$membership_type}</td></tr>
+        <tr><td class="label">{ts}Membership Type{/ts}</td><td>{$membership_type|escape}</td></tr>
         {if $has_related}
             <tr><td class="label">{ts}Max related{/ts}</td><td>{$max_related}</td></tr>
         {/if}
@@ -70,7 +70,7 @@
         </summary>
         <div class="crm-accordion-body">
           {if $rows.0.contribution_id}
-            {include file="CRM/Contribute/Form/Selector.tpl" context="Search"}
+            {include file="CRM/Contribute/Form/Selector.tpl" context="dashboard" single=false}
           {/if}
           <script type="text/javascript">
             var membershipID = {$id};

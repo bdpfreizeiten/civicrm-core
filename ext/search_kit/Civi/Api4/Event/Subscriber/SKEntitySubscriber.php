@@ -63,6 +63,7 @@ class SKEntitySubscriber extends AutoService implements EventSubscriberInterface
         'searchable' => 'secondary',
         'class' => SKEntity::class,
         'icon' => 'fa-search-plus',
+        'primary_key' => $display['settings']['primaryKey'] ?? [],
         'search_fields' => [],
       ];
       foreach ($display['settings']['columns'] as $column) {
@@ -106,13 +107,24 @@ class SKEntitySubscriber extends AutoService implements EventSubscriberInterface
       'attributes' => 'ENGINE=InnoDB',
       'fields' => [],
     ];
+    // Use primary keys from original table, if available
+    $primaryKeys = CoreUtil::getInfoItem($this->savedSearch['api_entity'], 'primary_key') ?? [];
+    $newSettings['primaryKey'] = [];
+    // Format columns and assign primary keys
     foreach ($newSettings['columns'] as &$column) {
       $expr = $this->getSelectExpression($column['key']);
       if (!$expr) {
         continue;
       }
-      $column['spec'] = Meta::formatFieldSpec($column, $expr);
+      // If saving for the first time and `spec` exists, it's probably coming fully-formed from hook_civicrm_managed/.mgd.php
+      // Skip recalculating it in that case to prevent load-order issues. dev/core#6708
+      if ($event->id || empty($column['spec'])) {
+        $column['spec'] = Meta::formatFieldSpec($column, $expr);
+      }
       $table['fields'][] = $this->formatSQLSpec($column, $expr);
+      if (in_array($column['key'], $primaryKeys)) {
+        $newSettings['primaryKey'][] = $column['spec']['name'];
+      }
     }
     // Store new settings with added column spec
     $event->params['settings'] = $newSettings;

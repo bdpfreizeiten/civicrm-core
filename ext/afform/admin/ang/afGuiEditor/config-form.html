@@ -43,11 +43,13 @@
   </div>
 
   <div class="form-group">
-    <label for="afform_tags">
+    <label>
       {{:: editor.meta.afform_fields.tags.title }}
       <a crm-ui-help="hs({id: 'tags', title: editor.meta.afform_fields.tags.title})"></a>
     </label>
-    <input ng-list crm-ui-select="{multiple: true, data: editor.afformTags, placeholder: ts('None')}" class="form-control" id="afform_tags" ng-model="editor.afform.tags">
+    <div>
+      <crm-entity-tags tag-ids="editor.afformTagIds" entity-table="'Afform'" class="btn-group btn-group-sm"></crm-entity-tags>
+    </div>
   </div>
 
   <!-- Placement options do not apply to blocks -->
@@ -62,10 +64,15 @@
       <input ng-model="editor.afform.server_route" name="server_route" class="form-control" id="af_config_form_server_route" pattern="^civicrm\/[\-0-9a-zA-Z\/_]+$" onfocus="this.value = this.value || 'civicrm/'" onblur="if (this.value === 'civicrm/') this.value = ''" title="{{:: ts('Path must begin with &quot;civicrm/&quot;') }}" placeholder="{{:: ts('None') }}" ng-model-options="editor.debounceMode" ng-required="!!editor.placementRequiresServerRoute()">
     </div>
 
-    <div class="form-group" ng-if="!!editor.afform.server_route">
+    <div class="form-group" ng-show="!!editor.afform.server_route">
       <label>
-        <input type="checkbox" ng-model="editor.afform.is_public">
-        {{:: ts('Accessible on front-end of website') }}
+        {{:: ts('Frontend or backend?') }}
+        <a crm-ui-help="hs({id: 'server_route_is_public', title: ts('Frontend or backend?')})"></a>
+        <div class="crm-form-toggle-container">
+          <input type="checkbox" class="crm-form-toggle" ng-model="editor.afform.is_public">
+          <span class="crm-form-toggle-text crm-form-toggle-text-off">{{:: ts('Backend') }}</span>
+          <span class="crm-form-toggle-text crm-form-toggle-text-on">{{:: ts('Frontend') }}</span>
+        </div>
       </label>
     </div>
 
@@ -187,8 +194,8 @@
           <a crm-ui-help="hs({id: 'allow_verification_by_email', title: editor.meta.afform_fields.allow_verification_by_email.title})"></a>
         </label>
         <div class="form-inline" ng-if="editor.afform.allow_verification_by_email">
-          <label>{{:: ts('Email template') }}</label>
-          <input class="form-control" crm-autocomplete="'MessageTemplate'" id="afform_email_confirmation_template_id" ng-model="editor.afform.email_confirmation_template_id" auto-open="true" placeholder="{{:: ts('- select -') }}">
+          <label>{{:: editor.meta.afform_fields.email_confirmation_template_id.title }}</label>
+          <input class="form-control" crm-autocomplete="'MessageTemplate'" id="afform_email_confirmation_template_id" ng-model="editor.afform.email_confirmation_template_id" auto-open="true" placeholder="{{:: ts('Select') }}">
         </div>
       </div>
 
@@ -207,7 +214,7 @@
 
       <div class="form-group" ng-class="{'has-error': !!config_form.redirect.$error.pattern}" ng-if="editor.afform.confirmation_type === 'redirect_to_url'">
         <label for="af_config_redirect">
-          {{:: ts('Post-Submit Page') }}
+          {{:: editor.meta.afform_fields.redirect.title }}
         </label>
         <div class="input-group">
           <input ng-model="editor.afform.redirect" name="redirect" class="form-control" id="af_config_redirect" title="{{:: ts('Post-Submit Page') }}" pattern="^((http|https):\/\/|\/|civicrm\/)[-0-9a-zA-Z\/_.]\S+$" title="{{:: ts('Post-Submit Page must be either an absolute url, a relative url or a path starting with CiviCRM') }}" ng-model-options="editor.debounceMode" >
@@ -219,9 +226,16 @@
 
     <div class="form-group" ng-if="editor.afform.confirmation_type === 'show_confirmation_message'">
       <label for="af_config_confirmation_message">
-        {{:: ts('Confirmation message') }}
+        {{:: editor.meta.afform_fields.confirmation_message.title }}
       </label>
-      <textarea ng-model="editor.afform.confirmation_message" class="form-control" id="af_config_confirmation_message" ng-model-options="editor.debounceMode"></textarea>
+      <civi-rich-text-input
+        id="af_config_confirmation_message"
+        class="form-control"
+        crm-custom-element-model
+        ng-model="editor.afform.confirmation_message"
+        token-picker
+        include-submission-tokens
+      ></civi-rich-text-input>
       <p class="help-block">{{:: ts("This message wil be displayed when the form is submitted.") }}</p>
     </div>
 

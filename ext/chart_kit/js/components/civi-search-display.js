@@ -1,14 +1,5 @@
 (function (api4, $, _) {
 
-  const generateUniqueId = (length) => {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let result = "";
-    for (let i = 0; i < length; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-  };
-
   CRM.components = CRM.components || {};
 
   CRM.components.civi_search_display = class CiviSearchDisplay extends HTMLElement {
@@ -27,6 +18,9 @@
       this.onPreRun = [];
       this.onPostRun = [];
       this._runCount = 0;
+      // Bound once: the listener runs on afFieldset, so a bare
+      // _onChangeFilters loses `this`, and .bind() breaks removal.
+      this._onChangeFiltersListener = () => this._onChangeFilters();
     }
 
     connectedCallback() {
@@ -34,9 +28,9 @@
     }
 
     disconnectedCallback() {
-      // this removes listeners added in initializeDisplay
-      if (this.formContainer) {
-        this.formContainer.removeEventListener('crmFormChangeFilters', () => this._onChangeFilters());
+      // Must match the element, handler and capture flag used in initializeDisplay.
+      if (this.afFieldset) {
+        this.afFieldset.removeEventListener('crmFormChangeFilters', this._onChangeFiltersListener, true);
       }
     }
 
@@ -101,12 +95,14 @@
       return this.getAttribute('total-count');
     }
 
-    // TODO: previously this triggered immediately and had
-    // a trailing debounce?
-    // {leading: true, trailing: false}
     getResultsPronto() {
-      clearTimeout(this.nextRun);
-      this.nextRun = setTimeout(() => this.runSearch(), 300);
+      if (this.justRun) {
+        // if just run, dont run again
+        return;
+      }
+      this.runSearch();
+      this.justRun = true;
+      setTimeout(() => this.justRun = false, 300);
     }
 
     getResultsSoon() {
@@ -119,8 +115,7 @@
     initializeDisplay() {
       this.limit = this.settings.limit;
       this.sort = this.settings.sort ? _.cloneDeep(this.settings.sort) : [];
-      this.seed = Date.now();
-      this.uniqueId = generateUniqueId(20);
+      this.uniqueId = Math.floor(Math.random() * 10e10);
       this.placeholders = [];
       const placeholderCount = 'placeholder' in this.settings ? this.settings.placeholder : 5;
       for (let p=0; p < placeholderCount; ++p) {
@@ -183,21 +178,15 @@
         });
       }
 
-      if (this.afFieldset) {
-        // Add filter title to Afform
-        this.onPostRun.push((apiResults) => {
-          if (apiResults.run.labels && apiResults.run.labels.length && $scope.$parent.addTitle) {
-            console.log("$scope.$parent.addTitle(apiResults.run.labels.join(' '));");
-          }
-        });
-      }
+      // Trigger an event when the searchDisplay has completely (re-)loaded
+      this.onPostRun.push(() => this.dispatchEvent(new Event('load')));
 
       // NOTE: @see searchDisplayBaseTrait setUpWatches
       // here we reimplement with events
 
       // When filters are changed, trigger callbacks and refresh search (if there's no search button)
       if (this.afFieldset) {
-        this.afFieldset.addEventListener('crmFormChangeFilters', () => this._onChangeFilters(), true);
+        this.afFieldset.addEventListener('crmFormChangeFilters', this._onChangeFiltersListener, true);
       }
 
       // TODO: implement pager reload? this could be moved to a trait - not relevant for some displays
@@ -273,7 +262,7 @@
         display: this.display,
         sort: this.sort,
         limit: this.limit,
-        seed: this.seed,
+        seed: this.uniqueId,
         filters: this.getFilters(),
         afform: this.afFieldsetCtrl ? this.afFieldsetCtrl.getFormName() : null
       };

@@ -23,7 +23,7 @@ class ValidateFieldsSubscriber extends Generic\AbstractPrepareSubscriber {
   /**
    * @return array
    */
-  public static function getSubscribedEvents() {
+  public static function getSubscribedEvents(): array {
     return [
       // Validating between W_EARLY and W_MIDDLE allows other event subscribers to
       // alter params without constraint (only params added W_EARLY will be validated).
@@ -69,12 +69,15 @@ class ValidateFieldsSubscriber extends Generic\AbstractPrepareSubscriber {
     if ($value === NULL) {
       return TRUE;
     }
+    // Api4 only accepts scalar/array params
+    if (is_object($value)) {
+      return FALSE;
+    }
     foreach ($types as $type) {
       switch ($type) {
         case 'array':
         case 'bool':
         case 'string':
-        case 'object':
           $tester = 'is_' . $type;
           if ($tester($value)) {
             return TRUE;

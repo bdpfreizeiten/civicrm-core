@@ -351,43 +351,8 @@ class Container {
       []
     ))->addTag('kernel.event_subscriber')->setPublic(TRUE);
 
-    foreach (['Activity', 'Contact', 'Contribute', 'Event', 'Mailing', 'Member', 'Case', 'Pledge'] as $component) {
-      $container->setDefinition('crm_' . strtolower($component) . '_tokens', new Definition(
-        "CRM_{$component}_Tokens",
-        []
-      ))->addTag('kernel.event_subscriber')->setPublic(TRUE);
-    }
-    $container->setDefinition("crm_financial_trxn_tokens", new Definition(
-      'CRM_Financial_FinancialTrxnTokens',
-      []
-    ))->addTag('kernel.event_subscriber')->setPublic(TRUE);
-
     $container->setDefinition('civi_token_impliedcontext', new Definition(
       'Civi\Token\ImpliedContextSubscriber',
-      []
-    ))->addTag('kernel.event_subscriber')->setPublic(TRUE);
-    $container->setDefinition('crm_participant_tokens', new Definition(
-      'CRM_Event_ParticipantTokens',
-      []
-    ))->addTag('kernel.event_subscriber')->setPublic(TRUE);
-    $container->setDefinition('crm_contribution_recur_tokens', new Definition(
-      'CRM_Contribute_RecurTokens',
-      []
-    ))->addTag('kernel.event_subscriber')->setPublic(TRUE);
-    $container->setDefinition('crm_contribution_recur_tokens', new Definition(
-      'CRM_Contribute_RecurTokens',
-      []
-    ))->addTag('kernel.event_subscriber')->setPublic(TRUE);
-    $container->setDefinition('crm_survey_tokens', new Definition(
-      'CRM_Campaign_SurveyTokens',
-      []
-    ))->addTag('kernel.event_subscriber')->setPublic(TRUE);
-    $container->setDefinition('crm_group_tokens', new Definition(
-      'CRM_Core_GroupTokens',
-      []
-    ))->addTag('kernel.event_subscriber')->setPublic(TRUE);
-    $container->setDefinition('crm_domain_tokens', new Definition(
-      'CRM_Core_DomainTokens',
       []
     ))->addTag('kernel.event_subscriber')->setPublic(TRUE);
 
@@ -472,6 +437,11 @@ class Container {
         \Civi::dispatcher()->dispatch($eventName . "::" . $e->{$methodName}(), $e);
       };
     };
+    $aliasFuncEvent = function($eventName, $func) {
+      return function($e) use ($eventName, $func) {
+        \Civi::dispatcher()->dispatch($eventName . '::' . $func($e), $e);
+      };
+    };
 
     $dispatcher->addListener('civi.api4.validate', $aliasMethodEvent('civi.api4.validate', 'getEntityName'), 100);
     $dispatcher->addListener('civi.api4.authorizeRecord', $aliasMethodEvent('civi.api4.authorizeRecord', 'getEntityName'), 100);
@@ -479,10 +449,12 @@ class Container {
     $dispatcher->addListener('civi.core.install', ['\Civi\Core\InstallationCanary', 'check']);
     $dispatcher->addListener('civi.core.install', ['\Civi\Core\DatabaseInitializer', 'initialize']);
     $dispatcher->addListener('&civi.mailing.track', ['CRM_Mailing_BAO_MailingTrackableURL', 'on_civi_mailing_track'], -500);
+    $dispatcher->addListener('hook_civicrm_initiators', $aliasFuncEvent('hook_civicrm_initiators', fn($e) => $e->context['for']), 100);
     $dispatcher->addListener('hook_civicrm_post', ['\CRM_Core_Transaction', 'addPostCommit'], -1000);
     $dispatcher->addListener('hook_civicrm_pre', $aliasEvent('hook_civicrm_pre', 'entity'), 100);
     $dispatcher->addListener('civi.dao.preDelete', ['\CRM_Core_BAO_EntityTag', 'preDeleteOtherEntity']);
     $dispatcher->addListener('hook_civicrm_post', $aliasEvent('hook_civicrm_post', 'entity'), 100);
+    $dispatcher->addListener('hook_civicrm_postCommit', $aliasEvent('hook_civicrm_postCommit', 'entity'), 100);
     $dispatcher->addListener('hook_civicrm_post::Activity', ['\Civi\CCase\Events', 'fireCaseChange']);
     $dispatcher->addListener('hook_civicrm_post::Case', ['\Civi\CCase\Events', 'fireCaseChange']);
     $dispatcher->addListener('hook_civicrm_caseChange', ['\Civi\CCase\Events', 'delegateToXmlListeners']);

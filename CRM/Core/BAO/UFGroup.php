@@ -1892,7 +1892,7 @@ AND    ( entity_id IS NULL OR entity_id <= 0 )
     elseif (in_array($fieldName, ['gender_id', 'communication_style_id'])) {
       $options = [];
       $pseudoValues = CRM_Contact_DAO_Contact::buildOptions($fieldName);
-      $form->addRadio($name, ts('%1', [1 => $title]), $pseudoValues, ['allowClear' => !$required], NULL, $required);
+      $form->addRadio($name, ts('%1', [1 => $title]), $pseudoValues, ['allowClear' => !$required], '', $required);
     }
     elseif ($fieldName === 'prefix_id' || $fieldName === 'suffix_id') {
       $form->addSelect($name, [
@@ -2009,7 +2009,7 @@ AND    ( entity_id IS NULL OR entity_id <= 0 )
     }
     elseif (substr($fieldName, 0, 4) === 'url-') {
       $form->add('text', $name, $title, CRM_Core_DAO::getAttribute('CRM_Core_DAO_Website', 'url'), $required);
-      $form->addRule($name, ts('Enter a valid web address beginning with \'http://\' or \'https://\'.'), 'url');
+      $form->addRule($name, ts('Enter a valid website address, such as https://example.org'), 'url');
     }
     // Note should be rendered as textarea
     elseif (substr($fieldName, -4) == 'note') {
@@ -3123,15 +3123,6 @@ AND    ( entity_id IS NULL OR entity_id <= 0 )
                     $skipValue = TRUE;
                     $defaults['field'][$componentId][$name] = $customValue;
                     break;
-                  }
-                  elseif (($tree['fields'][$customFieldDetails[0]]['data_type'] ?? NULL) == 'Date') {
-                    $skipValue = TRUE;
-
-                    // CRM-6681, $default contains formatted date, time values.
-                    $defaults[$fldName] = $customValue;
-                    if (!empty($defaults[$customKey . '_time'])) {
-                      $defaults['field'][$componentId][$name . '_time'] = $defaults[$customKey . '_time'];
-                    }
                   }
                 }
               }

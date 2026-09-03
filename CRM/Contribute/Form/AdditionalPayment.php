@@ -224,7 +224,8 @@ class CRM_Contribute_Form_AdditionalPayment extends CRM_Contribute_Form_Abstract
       $eventID = CRM_Core_DAO::getFieldValue('CRM_Event_DAO_Participant', $this->_id, 'event_id', 'id');
     }
 
-    $this->add('select', 'from_email_address', ts('Receipt From'), CRM_Financial_BAO_Payment::getValidFromEmailsForPayment($eventID ?? NULL), FALSE, ['class' => 'crm-select2 huge']);
+    $fromEmailSelect = $this->add('select', 'from_email_address', ts('Receipt From'), CRM_Financial_BAO_Payment::getValidFromEmailsForPayment($eventID ?? NULL), FALSE, ['class' => 'crm-select2 huge']);
+    $fromEmailSelect->setOptionTextEscaped();
 
     $this->add('textarea', 'receipt_text', ts('Confirmation Message'));
 
@@ -406,6 +407,7 @@ class CRM_Contribute_Form_AdditionalPayment extends CRM_Contribute_Form_Abstract
     if ($paymentParams['amount'] > 0.0) {
       if (!empty($this->contributionID)) {
         if (empty($paymentParams['description'])) {
+          $paymentParams['contributionID'] = $this->contributionID;
           $paymentParams['description'] = CRM_Core_DAO::getFieldValue('CRM_Contribute_DAO_Contribution', $this->_contributionId, 'source');
         }
 
@@ -413,16 +415,13 @@ class CRM_Contribute_Form_AdditionalPayment extends CRM_Contribute_Form_Abstract
           $financialTypeID = CRM_Core_DAO::getFieldValue('CRM_Contribute_DAO_Contribution', $this->_contributionId, 'financial_type_id');
           $paymentParams['financial_type_id'] = CRM_Financial_BAO_FinancialAccount::getAccountingCode($financialTypeID);
         }
-
-        if (empty($paymentParams['contributionType_accounting_code'])) {
-          // anticipate standardizing on 'financial_type_id' but until the payment processor code is updated, we need to set this param
-          $paymentParams['contributionType_accounting_code'] = $paymentParams['financial_type_id'];
-        }
       }
 
       try {
         // Re-retrieve the payment processor in case the form changed it, CRM-7179
         $payment = \Civi\Payment\System::singleton()->getById($this->getPaymentProcessorID());
+        $payment->setBackOffice(TRUE);
+        $paymentParams['invoiceID'] = $this->getInvoiceID();
         $result = $payment->doPayment($paymentParams);
         return [
           'fee_amount' => $result['fee_amount'] ?? 0,

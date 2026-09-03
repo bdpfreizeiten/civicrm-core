@@ -4,6 +4,7 @@ return [
   'name' => 'Mailing',
   'table' => 'civicrm_mailing',
   'class' => 'CRM_Mailing_DAO_Mailing',
+  'token_class' => 'CRM_Mailing_Tokens',
   'getInfo' => fn() => [
     'title' => ts('Mailing'),
     'title_plural' => ts('Mailings'),
@@ -35,6 +36,9 @@ return [
       'required' => TRUE,
       'primary_key' => TRUE,
       'auto_increment' => TRUE,
+      'usage' => [
+        'token',
+      ],
     ],
     'domain_id' => [
       'title' => ts('Domain ID'),
@@ -42,6 +46,7 @@ return [
       'input_type' => 'EntityRef',
       'description' => ts('Which site is this mailing for'),
       'add' => '3.4',
+      'default_callback' => ['CRM_Core_BAO_Domain', 'getDomainID'],
       'input_attrs' => [
         'label' => ts('Domain'),
       ],
@@ -145,7 +150,7 @@ return [
     ],
     'name' => [
       'title' => ts('Mailing Name'),
-      'sql_type' => 'varchar(128)',
+      'sql_type' => 'varchar(255)',
       'input_type' => 'Text',
       'description' => ts('Mailing Name.'),
       'unique_name' => 'mailing_name',
@@ -484,7 +489,7 @@ return [
       'add' => '3.3',
     ],
     'is_archived' => [
-      'title' => ts('Is Mailing Archived?'),
+      'title' => ts('Archived Mailing'),
       'sql_type' => 'boolean',
       'input_type' => 'CheckBox',
       'required' => TRUE,

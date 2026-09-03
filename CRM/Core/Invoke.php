@@ -143,13 +143,6 @@ class CRM_Core_Invoke {
     }
     $item = CRM_Core_Menu::get($path);
 
-    // we should try to compute menus, if item is empty and stay on the same page,
-    // rather than compute and redirect to dashboard.
-    if (!$item) {
-      CRM_Core_Menu::store(FALSE);
-      $item = CRM_Core_Menu::get($path);
-    }
-
     return $item;
   }
 
@@ -252,32 +245,6 @@ class CRM_Core_Invoke {
     CRM_Core_Menu::store();
     CRM_Core_Session::setStatus(ts('Menu has been rebuilt'), ts('Complete'), 'success');
     return CRM_Utils_System::redirect();
-  }
-
-  /**
-   * This function contains the default action.
-   *
-   * Unused function.
-   *
-   * @param $action
-   *
-   * @param $contact_type
-   * @param $contact_sub_type
-   *
-   * @Deprecated
-   */
-  public static function form($action, $contact_type, $contact_sub_type) {
-    CRM_Core_Error::deprecatedWarning('unused');
-    CRM_Utils_System::setUserContext(['civicrm/contact/search/basic', 'civicrm/contact/view']);
-    $wrapper = new CRM_Utils_Wrapper();
-
-    $properties = CRM_Core_Component::contactSubTypeProperties($contact_sub_type, 'Edit');
-    if ($properties) {
-      $wrapper->run($properties['class'], ts('New %1', [1 => $contact_sub_type]), $action, TRUE);
-    }
-    else {
-      $wrapper->run('CRM_Contact_Form_Contact', ts('New Contact'), $action, TRUE);
-    }
   }
 
   /**

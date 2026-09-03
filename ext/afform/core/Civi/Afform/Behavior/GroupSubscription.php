@@ -17,7 +17,7 @@ class GroupSubscription extends AbstractBehavior implements EventSubscriberInter
   /**
    * @return array
    */
-  public static function getSubscribedEvents() {
+  public static function getSubscribedEvents(): array {
     return [
       'civi.afform.sort.prefill' => 'onAfformSortPrefill',
       'civi.afform.prefill' => ['onAfformPrefill', 99],
@@ -44,7 +44,7 @@ class GroupSubscription extends AbstractBehavior implements EventSubscriberInter
     return \CRM_Core_Component::isEnabled('CiviMail') ? 'double-opt-in' : 'no-confirm';
   }
 
-  public static function getModes(string $contactType): array {
+  public static function getModes(string $entityName): array {
     $modes = [];
     if (\CRM_Core_Component::isEnabled('CiviMail')) {
       $modes[] = [
@@ -64,10 +64,8 @@ class GroupSubscription extends AbstractBehavior implements EventSubscriberInter
   public static function onAfformSortPrefill(AfformEntitySortEvent $event): void {
     $formEntities = $event->getFormDataModel()->getEntities();
     foreach ($formEntities as $entityName => $entity) {
-      if ($entity['type'] === 'GroupSubscription') {
-        if (isset($formEntities[$entity['data']['contact_id']])) {
-          $event->addDependency($entityName, $entity['data']['contact_id']);
-        }
+      if ($entity['type'] === 'GroupSubscription' && \array_key_exists($entity['data']['contact_id'], $formEntities)) {
+        $event->addDependency($entityName, $entity['data']['contact_id']);
       }
     }
   }
@@ -82,7 +80,7 @@ class GroupSubscription extends AbstractBehavior implements EventSubscriberInter
     }
     $contact = $subscriptionEntity['data']['contact_id'];
     if ($contact === 'user_contact_id') {
-      $cid = \CRM_Core_Session::getLoggedInContactID();
+      $cid = $event->getApiRequest()->getSubmitterContactID();
     }
     elseif ($contact && \CRM_Utils_Rule::positiveInteger($contact)) {
       $cid = $contact;

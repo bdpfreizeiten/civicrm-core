@@ -12,6 +12,7 @@
 
 namespace Civi\Api4\Utils;
 
+use Civi\Api4\Query\Api4Query;
 use Civi\Api4\Query\SqlExpression;
 
 require_once 'api/v3/utils.php';
@@ -123,12 +124,17 @@ class FormattingUtil {
     // Special handling for 'current_user' and user lookups
     $exactMatch = [NULL, '=', '!=', '<>', 'IN', 'NOT IN', 'CONTAINS', 'NOT CONTAINS'];
     if (is_string($fk) && CoreUtil::isContact($fk) && in_array($operator, $exactMatch, TRUE)) {
-      $value = self::resolveContactID($fieldSpec['name'], $value);
+      $value = self::resolveContactID($fieldSpec['name'], $value) ?? $value;
     }
 
     switch ($fieldSpec['data_type'] ?? NULL) {
       case 'Timestamp':
-        $format = 'YmdHis';
+        // In query/filter context (operator is set), use SQL standard 'Y-m-d H:i:s' format.
+        // This is necessary for correct HAVING clause comparisons against aggregate functions
+        // like GROUP_FIRST which return dates as varchar strings in that format via GROUP_CONCAT.
+        // In write context (operator is NULL), keep 'YmdHis' as required by CRM_Utils_Type::validate.
+        // @see https://lab.civicrm.org/dev/core/-/work_items/6612
+        $format = $operator !== NULL ? 'Y-m-d H:i:s' : 'YmdHis';
         // Using `=` with a Y-m-d timestamp means we really want `BETWEEN` midnight and 11:59:59pm.
         if ($operator && is_string($value) && !array_key_exists($value, \CRM_Core_OptionGroup::values('relative_date_filters'))) {
           $isYmd = (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value));
@@ -144,7 +150,10 @@ class FormattingUtil {
         break;
 
       case 'Date':
-        $value = self::formatDateValue('Ymd', $value, $operator, $index);
+        // In query/filter context use 'Y-m-d'; in write context use 'Ymd' (required by CRM_Utils_Type::validate).
+        // @see https://lab.civicrm.org/dev/core/-/work_items/6612
+        $format = $operator !== NULL ? 'Y-m-d' : 'Ymd';
+        $value = self::formatDateValue($format, $value, $operator, $index);
         break;
     }
 
@@ -167,7 +176,7 @@ class FormattingUtil {
    */
   public static function formatDateValue($format, $value, &$operator = NULL, $index = NULL) {
     // Non-relative dates (or if no search operator)
-    if (!$operator || !array_key_exists($value, \CRM_Core_OptionGroup::values('relative_date_filters'))) {
+    if (!$operator || !array_key_exists($value ?? '', (array) \CRM_Core_OptionGroup::values('relative_date_filters'))) {
       return date($format, strtotime($value ?? ''));
     }
     if (isset($index) && !strstr($operator, 'BETWEEN')) {
@@ -222,9 +231,10 @@ class FormattingUtil {
    * @param array $fields
    * @param string $action
    * @param array $selectAliases
+   * @param \Civi\Api4\Query\Api4Query|null $query
    * @throws \CRM_Core_Exception
    */
-  public static function formatOutputValues(&$records, $fields, $action = 'get', $selectAliases = []) {
+  public static function formatOutputValues(&$records, $fields, $action = 'get', $selectAliases = [], ?Api4Query $query = NULL) {
     $fieldExprs = [];
     foreach ($records as &$result) {
       $contactTypePaths = [];
@@ -248,13 +258,14 @@ class FormattingUtil {
         $fieldExpr = $fieldExprs[$key];
         $fieldName = \CRM_Utils_Array::first($fieldExpr->getFields());
         $baseName = $fieldName ? \CRM_Utils_Array::first(explode(':', $fieldName)) : NULL;
-        $field = $fields[$fieldName] ?? $fields[$baseName] ?? NULL;
+        $field = $fields[$fieldName ?? ''] ?? $fields[$baseName ?? ''] ?? $fields[$key] ?? NULL;
         $dataType = $field['data_type'] ?? ($fieldName == 'id' ? 'Integer' : NULL);
         // Allow Sql Functions to alter the value and/or $dataType
         if (method_exists($fieldExpr, 'formatOutputValue') && is_string($value)) {
-          $fieldExpr->formatOutputValue($dataType, $result, $key);
+          $fieldExpr->formatOutputValue($dataType, $result, $key, $query);
           $value = $result[$key];
         }
+        // Output postprocessing - @see FieldSpec::addOutputFormatter
         if (!empty($field['output_formatters'])) {
           self::applyFormatters($result, $fieldExpr, $field, $value);
           $dataType = NULL;
@@ -340,8 +351,33 @@ class FormattingUtil {
     catch (\CRM_Core_Exception $e) {
       // Entity not in Civi (api-only) will use fallback below
     }
-    // Fallback for option lists that only exist in the api but not in core
-    $options ??= civicrm_api4($field['entity'], 'getFields', ['checkPermissions' => FALSE, 'action' => $action, 'loadOptions' => ['id', $valueType], 'where' => [['name', '=', $field['name']]]])[0]['options'] ?? NULL;
+    // Fallback for option lists that only exist in the api but not in core.
+    // Cached per domain/locale to avoid repeating getFields for every record.
+    if (!isset($options)) {
+      $cacheKey = implode('_', [
+        \CRM_Core_Config::domainID(),
+        \CRM_Core_I18n::getLocale(),
+        'api4options',
+        $field['entity'],
+        \CRM_Utils_String::munge($field['name'], '_', 0),
+        $valueType,
+        $action,
+      ]);
+
+      // Only a found option list is cached; "no options" is not cached as a negative.
+      $options = \Civi::cache('metadata')->get($cacheKey);
+      if (!is_array($options)) {
+        $options = civicrm_api4($field['entity'], 'getFields', [
+          'checkPermissions' => FALSE,
+          'action' => $action,
+          'loadOptions' => ['id', $valueType],
+          'where' => [['name', '=', $field['name']]],
+        ])[0]['options'] ?? NULL;
+        if (is_array($options)) {
+          \Civi::cache('metadata')->set($cacheKey, $options);
+        }
+      }
+    }
 
     $options = $options ? array_column($options, $valueType, 'id') : $options;
     if (is_array($options)) {
@@ -576,6 +612,25 @@ class FormattingUtil {
       return substr($fieldName, 0, -1 - strlen($suffix));
     }
     return $fieldName;
+  }
+
+  /**
+   * Check if a field name (or suffix representation of it) exists in the record.
+   *
+   * @param string $fieldName
+   * @param array $params
+   * @return bool
+   */
+  public static function hasField(string $fieldName, array $params): bool {
+    if (array_key_exists($fieldName, $params)) {
+      return TRUE;
+    }
+    foreach (array_keys($params) as $key) {
+      if (str_starts_with($key, $fieldName . ':')) {
+        return TRUE;
+      }
+    }
+    return FALSE;
   }
 
 }

@@ -10,10 +10,10 @@
       require: ['^^afForm'],
       $$tlb: true,
       link: function($scope, $element, $attr, ctrl, $transclude) {
-        var block, childScope, previousElements;
+        let block, childScope, previousElements;
 
         function watcher() {
-          var conditions = $parse($attr.afIf)();
+          const conditions = $parse($attr.afIf)();
           return ctrl[0].checkConditions(conditions);
         }
 
@@ -70,7 +70,7 @@
     for (var i = 1; node !== endNode && (node = node.nextSibling); i++) {
       if (blockNodes || nodes[i] !== node) {
         if (!blockNodes) {
-          blockNodes = $(slice.call(nodes, 0, i));
+          blockNodes = $(Array.from(nodes).slice(0, i));
         }
         blockNodes.push(node);
       }

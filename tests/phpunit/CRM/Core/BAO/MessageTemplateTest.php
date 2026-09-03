@@ -14,13 +14,12 @@ use Civi\WorkflowMessage\WorkflowMessage;
  * @group msgtpl
  */
 class CRM_Core_BAO_MessageTemplateTest extends CiviUnitTestCase {
-
   use CRMTraits_Custom_CustomDataTrait;
 
   /**
    * Post test cleanup.
    */
-  public function tearDown():void {
+  public function tearDown(): void {
     $this->quickCleanup(['civicrm_address', 'civicrm_phone', 'civicrm_im', 'civicrm_website', 'civicrm_openid', 'civicrm_email', 'civicrm_translation'], TRUE);
     $this->quickCleanUpFinancialEntities();
     parent::tearDown();
@@ -54,6 +53,28 @@ class CRM_Core_BAO_MessageTemplateTest extends CiviUnitTestCase {
     $this->assertEquals('Hello testRenderTemplate Abba Baa!', $rendered['subject']);
     $this->assertEquals('Hello testRenderTemplate Abba Baa!', $rendered['text']);
     $this->assertStringContainsString('<p>Hello testRenderTemplate Abba Baa!</p>', $rendered['html']);
+  }
+
+  /**
+   * Test rendering a specific message template by its ID.
+   *
+   * The template is loaded purely from its ID, with no workflow. Only
+   * default templates can be loaded this way.
+   *
+   * @throws \CRM_Core_Exception
+   */
+  public function testRenderTemplateByID(): void {
+    $templateID = MessageTemplate::create(FALSE)->setValues([
+      'msg_html' => '<p>Rendered by ID</p>',
+      'workflow_name' => 'test_render_specific_template',
+      'is_active' => TRUE,
+      'is_default' => TRUE,
+    ])->execute()->first()['id'];
+
+    $rendered = CRM_Core_BAO_MessageTemplate::renderTemplate([
+      'messageTemplateID' => $templateID,
+    ]);
+    $this->assertStringContainsString('<p>Rendered by ID</p>', $rendered['html']);
   }
 
   /**
@@ -312,7 +333,7 @@ class CRM_Core_BAO_MessageTemplateTest extends CiviUnitTestCase {
   }
 
   public function testSendTemplate_RenderMode_DefaultTpl(): void {
-    CRM_Core_Transaction::create(TRUE)->run(function(CRM_Core_Transaction $tx) {
+    CRM_Core_Transaction::create(TRUE)->run(function (CRM_Core_Transaction $tx) {
       $tx->rollback();
 
       MessageTemplate::update()
@@ -348,8 +369,115 @@ class CRM_Core_BAO_MessageTemplateTest extends CiviUnitTestCase {
     });
   }
 
+  /**
+   * Test that sendTemplate returns 5 values including errorMessage with actual errors.
+   *
+   * @throws \CRM_Core_Exception
+   */
+  public function testSendTemplate_ErrorMessage(): void {
+    $contactId = $this->individualCreate([
+      'first_name' => 'Abba',
+      'last_name' => 'Baa',
+      'prefix_id' => NULL,
+      'suffix_id' => NULL,
+    ]);
+
+    // First test: successful send returns 5 values with NULL errorMessage
+    $result = CRM_Core_BAO_MessageTemplate::sendTemplate(
+      [
+        'workflow' => 'case_activity',
+        'contactId' => $contactId,
+        'from' => 'admin@example.com',
+        'toEmail' => 'test@example.com',
+        'toName' => 'Test User',
+        'attachments' => NULL,
+        'messageTemplate' => [
+          'msg_subject' => 'Test Subject',
+          'msg_text' => 'Test Text',
+          'msg_html' => '<p>Test HTML</p>',
+        ],
+      ]
+    );
+
+    // Verify 5 return values
+    $this->assertIsArray($result, 'sendTemplate should return an array');
+    $this->assertCount(5, $result, 'sendTemplate should return 5 values');
+
+    [$sent, $subject, $messageText, $messageHtml, $errorMessage] = $result;
+
+    // Verify types
+    $this->assertIsBool($sent, 'First return value should be boolean');
+    $this->assertIsString($subject, 'Second return value should be string');
+    $this->assertIsString($messageText, 'Third return value should be string');
+    $this->assertIsString($messageHtml, 'Fourth return value should be string');
+    $this->assertTrue(
+      $errorMessage === NULL || is_string($errorMessage),
+      'Fifth return value (errorMessage) should be NULL or string'
+    );
+
+    // Verify content
+    $this->assertEquals('Test Subject', $subject);
+
+    // In successful case, errorMessage should be NULL
+    if ($sent === TRUE) {
+      $this->assertNull($errorMessage, 'errorMessage should be NULL when email is sent successfully');
+    }
+  }
+
+  /**
+   * Test that sendTemplate returns error message when SMTP fails.
+   *
+   * @throws \CRM_Core_Exception
+   */
+  public function testSendTemplate_SMTPError(): void {
+    $contactId = $this->individualCreate([
+      'first_name' => 'Abba',
+      'last_name' => 'Baa',
+      'prefix_id' => NULL,
+      'suffix_id' => NULL,
+    ]);
+
+    // Force SMTP error using alterMailer hook
+    $mockMailer = new CRM_Utils_FakeObject([
+      'send' => function ($recipients, $headers, $body) {
+        throw new \Exception('SMTP connection failed: Connection refused to mail.invalid.test:25');
+      },
+    ]);
+
+    CRM_Utils_Hook::singleton()->setHook(
+      'civicrm_alterMailer',
+      function (&$mailer, $driver, $params) use ($mockMailer) {
+        $mailer = $mockMailer;
+      }
+    );
+
+    $result = CRM_Core_BAO_MessageTemplate::sendTemplate(
+      [
+        'workflow' => 'case_activity',
+        'contactId' => $contactId,
+        'from' => 'admin@example.com',
+        'toEmail' => 'test@example.com',
+        'toName' => 'Test User',
+        'attachments' => NULL,
+        'messageTemplate' => [
+          'msg_subject' => 'Test Subject',
+          'msg_text' => 'Test Text',
+          'msg_html' => '<p>Test HTML</p>',
+        ],
+      ]
+    );
+
+    // Verify error case
+    $this->assertCount(5, $result, 'sendTemplate should return 5 values even on error');
+    [$sent, $subject, $messageText, $messageHtml, $errorMessage] = $result;
+
+    $this->assertFalse($sent, 'Email should not be sent when mailer throws exception');
+    $this->assertIsString($errorMessage, 'errorMessage should be a string when there is an error');
+    $this->assertStringContainsString('SMTP connection failed', $errorMessage, 'errorMessage should contain the actual error');
+  }
+
   public function testSendTemplateRenderModeTokenContext(): void {
-    CRM_Core_Transaction::create(TRUE)->run(function(CRM_Core_Transaction $tx) {
+    CRM_Core_Transaction::create(TRUE)->run(function (CRM_Core_Transaction $tx) {
       $tx->rollback();
 
       MessageTemplate::update()
@@ -394,7 +522,7 @@ class CRM_Core_BAO_MessageTemplateTest extends CiviUnitTestCase {
    *
    * @throws \CRM_Core_Exception
    */
-  public function testCaseActivityCopyTemplate():void {
+  public function testCaseActivityCopyTemplate(): void {
     $client_id = $this->individualCreate();
     $contact_id = $this->individualCreate();
     \CRM_Core_DAO::executeQuery("
@@ -632,7 +760,7 @@ London, 90210
     $address = $this->setupContactFromTokeData($tokenData);
     $advertisedTokens = CRM_Core_SelectValues::contactTokens();
 
-    // let's unset specical afform submission tokens which are kind of related to contact
+    // let's unset special afform submission tokens which are kind of related to contact
     // but not exactly as contact is not yet created
     unset($advertisedTokens['{afformSubmission.validateSubmissionUrl}']);
     unset($advertisedTokens['{afformSubmission.validateSubmissionLink}']);
@@ -737,6 +865,7 @@ emo
       'contact.address_primary.county_id:label:',
       'contact.contact_is_deleted:',
       'contact.county:',
+      'contact.custom_15:',
       'contact.custom_6:',
       'contact.deceased_date:',
       'contact.do_not_phone:',
@@ -933,6 +1062,7 @@ emo
       '{contact.address_primary.county_id:label}' => 'County',
       '{contact.address_primary.state_province_id:abbr}' => 'State/Province',
       '{contact.address_primary.country_id:label}' => 'Country',
+      '{contact.address_primary.country_id:abbr}' => 'Country ISO Code',
       '{contact.phone_primary.phone}' => 'Phone',
       '{contact.phone_primary.phone_ext}' => 'Phone Extension',
       '{contact.phone_primary.phone_type_id:label}' => 'Phone Type',
@@ -957,11 +1087,13 @@ emo
       '{contact.custom_5}' => 'test_link :: Custom Group',
       '{contact.custom_12}' => 'Yes No :: Custom Group',
       '{contact.custom_3}' => 'Test Date :: Custom Group',
-      '{contact.checksum}' => 'Checksum',
+      '{contact.checksum}' => 'Checksum (with cs=)',
+      '{contact.checksum_value}' => 'Checksum value',
       '{contact.id}' => 'Contact ID',
       '{important_stuff.favourite_emoticon}' => 'Best coolest emoticon',
       '{site.message_header}' => 'Message Header',
       '{contact.custom_14}' => 'Integer radio :: Custom Group',
+      '{contact.custom_15}' => 'Number select :: Custom Group',
     ];
   }
 
@@ -1312,6 +1444,7 @@ address_primary.master_id |' . $tokenData['master_id'] . '
 address_primary.county_id:label |
 address_primary.state_province_id:abbr |TX
 address_primary.country_id:label |United States
+address_primary.country_id:abbr |US
 phone_primary.phone |123-456
 phone_primary.phone_ext |77
 phone_primary.phone_type_id:label |Mobile
@@ -1337,10 +1470,12 @@ custom_5 |<a href="https://civicrm.org" target="_blank">https://civicrm.org</a>
 custom_12 |Yes
 custom_3 |01/20/2021 12:00AM
 checksum |cs=' . $checksum . '
+checksum_value |' . $checksum . '
 id |' . $tokenData['contact_id'] . '
 t_stuff.favourite_emoticon |
 sage_header |<div><!-- This content comes from the site message header token--></div>
 custom_14 |100
+custom_15 |
 ';
   }
 

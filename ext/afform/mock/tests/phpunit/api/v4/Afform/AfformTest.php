@@ -319,4 +319,74 @@ class AfformTest extends AfformTestCase implements TransactionalInterface {
     $this->assertEquals(['afCore', 'mockBareFile', 'mockBespoke', 'mockFoo'], $angModule['requires']);
   }
 
+  public function testXssFilteringInConfirmationMessage(): void {
+    $formName = 'mockBareFile';
+
+    // Update form with a confirmation message containing XSS attack vector
+    Afform::update()
+      ->addWhere('name', '=', $formName)
+      ->addValue('confirmation_message', '<p>Thank you!</p><script>alert("XSS")</script>')
+      ->execute();
+
+    // Get the form and verify the script tag is filtered out
+    $result = Afform::get()
+      ->addWhere('name', '=', $formName)
+      ->execute();
+
+    $this->assertStringNotContainsString('<script>', $result[0]['confirmation_message']);
+    $this->assertStringNotContainsString('alert', $result[0]['confirmation_message']);
+    $this->assertStringContainsString('<p>Thank you!</p>', $result[0]['confirmation_message']);
+
+    // Confirmation message not selected so should not be returned.
+    $result = Afform::get()
+      ->addWhere('name', '=', $formName)
+      ->addSelect('name', 'title')
+      ->execute();
+
+    $this->assertArrayNotHasKey('confirmation_message', $result[0]);
+
+    Afform::revert()->addWhere('name', '=', $formName)->execute();
+  }
+
+  public function testEmbedCycleIsRejected(): void {
+    $setLayout = fn(string $name, string $layout) => Afform::update()
+      ->addWhere('name', '=', $name)
+      ->setLayoutFormat('html')
+      ->setValues(['layout' => $layout])
+      ->execute();
+
+    try {
+      // mockPage embeds mock-bare-file and mock-foo by default; embedding an
+      // unrelated form is fine.
+      $setLayout('mockPage', '<div><mock-foo/></div>');
+
+      try {
+        $setLayout('mockPage', '<div><mock-page/></div>');
+        $this->fail('Expected a form embedding itself to be rejected');
+      }
+      catch (\CRM_Core_Exception $e) {
+        $this->assertStringContainsString('mockPage', $e->getMessage());
+      }
+
+      // Indirect: mockPage embeds mock-foo, so mockFoo may not embed mock-page.
+      try {
+        $setLayout('mockFoo', '<div><mock-page/></div>');
+        $this->fail('Expected an indirect embed cycle to be rejected');
+      }
+      catch (\CRM_Core_Exception $e) {
+        $this->assertStringContainsString('mockFoo', $e->getMessage());
+        $this->assertStringContainsString('mockPage', $e->getMessage());
+      }
+
+      // The rejected saves must not have been written.
+      $layout = Afform::get()->addWhere('name', '=', 'mockPage')->addSelect('layout')
+        ->setLayoutFormat('html')->execute()->single()['layout'];
+      $this->assertStringContainsString('<mock-foo', $layout);
+      $this->assertStringNotContainsString('<mock-page', $layout);
+    }
+    finally {
+      Afform::revert()->addWhere('name', 'IN', ['mockPage', 'mockFoo'])->execute();
+    }
+  }
+
 }

@@ -25,7 +25,7 @@ class CRM_Upgrade_Form extends CRM_Core_Form {
   /**
    * Minimum previous CiviCRM version we can directly upgrade from
    */
-  const MINIMUM_UPGRADABLE_VERSION = '4.7.31';
+  const MINIMUM_UPGRADABLE_VERSION = '5.51';
 
   /**
    * @var \CRM_Core_Config
@@ -370,9 +370,11 @@ SET    version = '$version'
       );
     }
     elseif (version_compare($currentVer, self::MINIMUM_UPGRADABLE_VERSION) < 0) {
-      $errors[] = ts('CiviCRM versions prior to %1 cannot be upgraded directly to %2. This upgrade will need to be done in stages. First download an intermediate version (the LTS may be a good choice) and upgrade to that before proceeding to this version.',
-        [1 => self::MINIMUM_UPGRADABLE_VERSION, 2 => $latestVer]
-      );
+      $errors[] = ts('CiviCRM versions prior to %1 cannot be upgraded directly to %2. This upgrade will need to be done in stages. First download an intermediate version (such as %3) and upgrade to that before proceeding to the latest version.', [
+        1 => self::MINIMUM_UPGRADABLE_VERSION,
+        2 => $latestVer,
+        3 => self::MINIMUM_UPGRADABLE_VERSION,
+      ]);
     }
 
     if (version_compare(phpversion(), CRM_Upgrade_Incremental_General::MIN_INSTALL_PHP_VER) < 0) {
@@ -405,6 +407,15 @@ SET    version = '$version'
         1 => $latestVer,
         2 => self::MINIMUM_THREAD_STACK,
       ]);
+    }
+
+    $installRequirements = new \Civi\Install\Requirements();
+    // FIXME: Duplicate checks appear in `Civi\Install\Requirements`. De-duplicate them. For now, we cherry-pick non-duplicates.
+    foreach (['checkArgSeparator'] as $installReq) {
+      $checkResult = $this->convertInstallCheckToError($installRequirements->$installReq());
+      if ($checkResult) {
+        $errors[] = $checkResult;
+      }
     }
 
     // CIVICRM_CRED_KEYS was introduced in 5.34. We make it required in 6.10+.
@@ -441,6 +452,18 @@ SET    version = '$version'
     }
 
     return $errors;
+  }
+
+  protected function convertInstallCheckToError(?array $checkResult): ?string {
+    if (empty($checkResult) || !array_key_exists('severity', $checkResult)) {
+      throw new \RuntimeException(ts('Malformed output from installation-requirements check.'));
+    }
+    return match($checkResult['severity']) {
+      \Civi\Install\Requirements::REQUIREMENT_ERROR => sprintf("<strong>%s</strong>: %s", htmlentities($checkResult['title']), htmlentities($checkResult['details'])),
+      // FIXME: Upgrade UI doesn't provide warning support for this kind of thing. Maybe nice to add another code-path through pre-upgrade message?
+      \Civi\Install\Requirements::REQUIREMENT_WARNING => NULL,
+      \Civi\Install\Requirements::REQUIREMENT_OK => NULL,
+    };
   }
 
   /**

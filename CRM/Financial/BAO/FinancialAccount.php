@@ -206,7 +206,7 @@ WHERE cft.id = %1
     // We look up by the name a couple times below, so flip it.
     $accountRelationships = array_flip($accountRelationshipsByValue);
 
-    $relationTypeId = $accountRelationships[$relationshipType] ?? NULL;
+    $relationTypeId = $accountRelationships[$relationshipType] ?? '';
 
     if (!isset(Civi::$statics[__CLASS__]['entity_financial_account'][$financialTypeID][$relationTypeId])) {
       $accounts = Civi\Api4\EntityFinancialAccount::get(FALSE)
@@ -269,6 +269,7 @@ WHERE cft.id = %1
       'Discounts Account is' => 'Revenue',
       'Sales Tax Account is' => 'Liability',
       'Deferred Revenue Account is' => 'Liability',
+      'Accounts Payable Account is' => 'Liability',
     ];
     if (!$flip) {
       foreach ($Links as $accountRelation => $accountType) {

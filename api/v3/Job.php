@@ -28,9 +28,6 @@ function _civicrm_api3_job_create_spec(&$params) {
   $params['name']['api.required'] = 1;
   $params['api_entity']['api.required'] = 1;
   $params['api_action']['api.required'] = 1;
-
-  $params['domain_id']['api.default'] = CRM_Core_Config::domainID();
-  $params['is_active']['api.default'] = 1;
 }
 
 /**
@@ -273,7 +270,7 @@ function civicrm_api3_job_mail_report($params) {
  * @return array
  */
 function civicrm_api3_job_update_greeting($params) {
-  if (isset($params['ct']) && isset($params['gt'])) {
+  if (isset($params['ct'], $params['gt'])) {
     $ct = explode(',', $params['ct']);
     $gt = explode(',', $params['gt']);
     foreach ($ct as $ctKey => $ctValue) {
@@ -634,7 +631,7 @@ function civicrm_api3_job_run_payment_cron($params) {
 /**
  * This api cleans up all the old session entries and temp tables.
  *
- * We recommend that sites run this on an hourly basis.
+ * We recommend that sites run this on a weekly basis.
  *
  * @param array $params
  *   Sends in various config parameters to decide what needs to be cleaned.
@@ -643,6 +640,7 @@ function civicrm_api3_job_run_payment_cron($params) {
 function civicrm_api3_job_cleanup($params) {
   $session = $params['session'] ?? TRUE;
   $tempTable = $params['tempTables'] ?? TRUE;
+  $tempFiles = $params['tempFiles'] ?? TRUE;
   $jobLog = $params['jobLog'] ?? TRUE;
   $expired = $params['expiredDbCache'] ?? TRUE;
   $prevNext = $params['prevNext'] ?? TRUE;
@@ -659,9 +657,17 @@ function civicrm_api3_job_cleanup($params) {
     CRM_Core_BAO_Job::cleanup();
   }
 
-  if ($tplCache) {
+  if ($tplCache && $tempFiles) {
+    $config = CRM_Core_Config::singleton();
+    $config->cleanup(3, FALSE);
+  }
+  elseif ($tplCache) {
     $config = CRM_Core_Config::singleton();
     $config->cleanup(1, FALSE);
+  }
+  elseif ($tempFiles) {
+    $config = CRM_Core_Config::singleton();
+    $config->cleanup(2, FALSE);
   }
 
   if ($dbCache) {

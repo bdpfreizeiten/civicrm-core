@@ -220,7 +220,7 @@ table.advmultiselect {
   box-shadow: none;
   border-radius: var(--crm-l-radius);
 }
-.crm-container .panel-body:before, #bootstrap-theme .panel-body:after {
+.crm-container .panel-body:before, .crm-container .panel-body:after {
   display: table;
   content: " ";
 }
@@ -370,7 +370,7 @@ table.advmultiselect {
 }
 .crm-container #civicrm-footer .status.crm-error {
   background-color: var(--crm-danger-color);
-  color: var(--danger-text);
+  color: var(--crm-danger-text-color);
 }
 #civicrm-footer .status a {
   color: inherit;
@@ -402,7 +402,7 @@ p.crm-upgrade-large-text {
   color: var(--crm-alert-success-text-color);
 }
 .crm-upgrade-box-inner a {
-  color: var(--link) !important  /* vs inline */;
+  color: var(--crm-link-color) !important  /* vs inline */;
 }
 p.crm-upgrade-large-text:first-of-type {
   font-size: var(--crm-l-reg-1);
@@ -417,36 +417,6 @@ p.crm-upgrade-large-text:first-of-type {
   color: var(--crm-alert-success-text-color);
   grid-column: 1;
   grid-row: 1 / span 3;
-}
-
-/* Upgrade extensions runner */
-
-#crm-queue-runner-progress {
-  width: 100%;
-  background: var(--crm-layer2-bg-color);
-}
-#crm-queue-runner-desc {
-  background: var(--crm-layer1-bg-color);
-  padding: var(--crm-padding-reg);
-  margin-block: var(--crm-l-reg);
-  border-radius: var(--crm-l-radius);
-  display: inline-flex;
-  flex-direction: row-reverse;
-  justify-content: space-between;
-  align-items: center;
-}
-#crm-queue-runner-buttonset {
-  position: inherit !important;
-}
-#crm-queue-runner-buttonset button {
-  background: transparent;
-  height: inherit;
-  padding: 0 0 0 var(--crm-l-reg);
-  color: var(--crm-text-color);
-}
-#crm-queue-runner-buttonset button:hover,
-#crm-queue-runner-buttonset button:focus {
-  color: var(--crm-text-color);
 }
 
 /* Community message */
@@ -491,93 +461,164 @@ div.civicrm-community-messages a.civicrm-community-message-dismiss::before {
   background: var(--crm-danger-color);
 }
 
+/* Labels */
+
+.crm-container .label-primary,
+.crm-container .label-warning,
+.crm-container .label-success,
+.crm-container .label-default,
+.crm-container .label-info,
+.crm-container .label-danger {
+  display: inline;
+  padding: var(--crm-btn-padding-block) var(--crm-btn-padding-inline);
+  font-weight: normal;
+  color: var(--crm-text-light-color);
+  text-align: center;
+  white-space: nowrap;
+  vertical-align: baseline;
+  border-radius: var(--crm-l-radius);
+}
+.crm-container .label-default {
+  background: var(--crm-c-darkest);
+  color: var(--crm-text-light-color);
+}
+.crm-container .label-default[href]:hover,
+.crm-container .label-default[href]:focus {
+  background: color-mix(in srgb, var(--crm-c-darkest) 87.5%, var(--crm-paper) 12.5%);
+}
+.crm-container .label-primary {
+  background: var(--crm-primary-color);
+  color: var(--crm-primary-text-color);
+}
+.crm-container .label-primary[href]:hover,
+.crm-container .label-primary[href]:focus {
+  background: var(--crm-primary-hover-color);
+}
+.crm-container .label-success {
+  background: var(--crm-success-color);
+  color: var(--crm-success-text-color);
+}
+.crm-container .label-success[href]:hover,
+.crm-container .label-success[href]:focus {
+  background: color-mix(in srgb, var(--crm-success-color) 87.5%, var(--crm-ink) 12.5%);
+}
+.crm-container .label-info {
+  background: var(--crm-info-color);
+  color: var(--crm-info-text-color);
+}
+.crm-container .label-info[href]:hover,
+.crm-container .label-info[href]:focus {
+  background: color-mix(in srgb, var(--crm-info-color) 87.5%, var(--crm-ink) 12.5%);
+}
+.crm-container .label-warning {
+  background: var(--crm-warning-color);
+  color: var(--crm-warning-text-color);
+}
+.crm-container .label-warning[href]:hover,
+.crm-container .label-warning[href]:focus {
+  background: color-mix(in srgb, var(--crm-warning-color) 87.5%, var(--crm-ink) 12.5%);
+}
+.crm-container .label-danger {
+  background: var(--crm-danger-color);
+  color: var(--crm-danger-text-color);
+}
+.crm-container .label-danger[href]:hover,
+.crm-container .label-danger[href]:focus {
+  background: color-mix(in srgb, var(--crm-danger-color) 87.5%, var(--crm-ink) 12.5%);
+}
+.crm-container span.label + span.label {
+  margin-left: var(--crm-flex-gap);
+}
+
 /* Background regions */
 
 #bootstrap-theme .bg-primary {
   background-color: var(--crm-primary-color);
   color: var(--crm-primary-text-color);
 }
-#bootstrap-theme .bg-primary a {
+#bootstrap-theme li.bg-primary > a,
+#bootstrap-theme .bg-primary > span > a:not(.btn),
+#bootstrap-theme .dropdown-menu .bg-primary .crm-i::before {
   color: var(--crm-primary-text-color);
 }
-#bootstrap-theme a.bg-primary:hover,
-#bootstrap-theme a.bg-primary:focus {
+#bootstrap-theme a.bg-primary:is(:hover,:focus),
+#bootstrap-theme .dropdown-menu .bg-primary a:is(:hover,:focus) {
   background-color: var(--crm-primary-hover-color);
+  color: var(--crm-primary-hover-text-color);
 }
 #bootstrap-theme .bg-secondary {
   background-color: var(--crm-secondary-color);
   color: var(--crm-secondary-text-color);
 }
-#bootstrap-theme .bg-secondary a {
+#bootstrap-theme li.bg-secondary > a,
+#bootstrap-theme .bg-secondary > span > a:not(.btn),
+#bootstrap-theme .dropdown-menu .bg-secondary .crm-i::before {
   color: var(--crm-secondary-text-color);
 }
-#bootstrap-theme a.bg-secondary:hover,
-#bootstrap-theme a.bg-secondary:focus {
+#bootstrap-theme a.bg-secondary:is(:hover,:focus),
+#bootstrap-theme .dropdown-menu .bg-secondary a:is(:hover,:focus) {
   background-color: var(--crm-secondary-hover-color);
+  color: var(--crm-secondary-hover-text-color);
 }
-#bootstrap-theme .dropdown-menu .bg-success a,
-#bootstrap-theme .dropdown-menu a.bg-success,
 #bootstrap-theme .bg-success {
   background-color: var(--crm-success-color);
   color: var(--crm-success-text-color);
 }
-#bootstrap-theme a.bg-success:hover,
-#bootstrap-theme a.bg-success:focus,
-#bootstrap-theme .dropdown-menu a.bg-success:hover,
-#bootstrap-theme .dropdown-menu .bg-success a:hover {
+#bootstrap-theme li.bg-success > a,
+#bootstrap-theme .bg-success > span > a:not(.btn),
+#bootstrap-theme .dropdown-menu .bg-success .crm-i::before {
+  color: var(--crm-success-text-color);
+}
+#bootstrap-theme a.bg-success:is(:hover,:focus),
+#bootstrap-theme .dropdown-menu a.bg-success:is(:hover,:focus),
+#bootstrap-theme .dropdown-menu .bg-success a:is(:hover,:focus) {
   background: color-mix(in srgb, var(--crm-success-color) 87.5%, #000 12.5%);
   color: var(--crm-success-text-color);
 }
-#bootstrap-theme .dropdown-menu .bg-info a,
-#bootstrap-theme .dropdown-menu a.bg-info,
 #bootstrap-theme .bg-info {
   background-color: var(--crm-info-color);
   color: var(--crm-info-text-color);
 }
-#bootstrap-theme a.bg-info:hover,
-#bootstrap-theme a.bg-info:focus,
-#bootstrap-theme .dropdown-menu .bg-info a:hover,
-#bootstrap-theme .dropdown-menu a.bg-info:hover {
+#bootstrap-theme li.bg-info > a,
+#bootstrap-theme .bg-info > span > a:not(.btn),
+#bootstrap-theme .dropdown-menu .bg-info .crm-i::before {
+  color: var(--crm-info-text-color);
+}
+#bootstrap-theme a.bg-info:is(:hover,:focus),
+#bootstrap-theme .dropdown-menu .bg-info a:is(:hover,:focus),
+#bootstrap-theme .dropdown-menu a.bg-info:is(:hover,:focus) {
   background: color-mix(in srgb, var(--crm-info-color) 87.5%, #000 12.5%);
   color: var(--crm-info-text-color);
 }
-#bootstrap-theme .bg-warning,
-#bootstrap-theme .dropdown-menu .bg-warning a,
-#bootstrap-theme .dropdown-menu a.bg-warning {
+#bootstrap-theme .bg-warning {
   background-color: var(--crm-warning-color);
-  color: var(--crm-warning-text-color) !important /* FormBuilder vs .disabled */;
-}
-#bootstrap-theme a.bg-warning:hover,
-#bootstrap-theme a.bg-warning:focus,
-#bootstrap-theme .dropdown-menu .bg-warning a:hover,
-#bootstrap-theme .dropdown-menu a.bg-warning:hover {
-  background: color-mix(in srgb, var(--crm-warning-color) 87.5%, #000 12.5%);
   color: var(--crm-warning-text-color);
 }
-#bootstrap-theme .bg-danger,
-#bootstrap-theme .dropdown-menu .bg-danger a,
-#bootstrap-theme .dropdown-menu a.bg-danger {
-  background-color: var(--crm-danger-color);
-  color: var(--crm-danger-text-color);
-}
-#bootstrap-theme a.bg-danger:hover,
-#bootstrap-theme a.bg-danger:focus,
-#bootstrap-theme .dropdown-menu .bg-danger a:hover,
-#bootstrap-theme .dropdown-menu a.bg-danger:hover {
-  background: color-mix(in srgb, var(--crm-danger-color) 87.5%, #000 12.5%);
-  color: var(--crm-danger-text-color);
-}
-#bootstrap-theme .dropdown-menu .bg-danger .crm-i::before {
-  color: var(--crm-danger-text-color);
-}
+#bootstrap-theme li.bg-warning > a,
+#bootstrap-theme .bg-warning > span > a:not(.btn),
 #bootstrap-theme .dropdown-menu .bg-warning .crm-i::before {
   color: var(--crm-warning-text-color);
 }
-#bootstrap-theme .dropdown-menu .bg-success .crm-i::before {
-  color: var(--crm-success-text-color);
+#bootstrap-theme a.bg-warning:is(:hover,:focus),
+#bootstrap-theme .dropdown-menu .bg-warning a:is(:hover,:focus),
+#bootstrap-theme .dropdown-menu a.bg-warning:is(:hover,:focus) {
+  background: color-mix(in srgb, var(--crm-warning-color) 87.5%, #000 12.5%);
+  color: var(--crm-warning-text-color);
 }
-#bootstrap-theme .dropdown-menu .bg-info .crm-i::before {
-  color: var(--crm-info-text-color);
+#bootstrap-theme .bg-danger {
+  background-color: var(--crm-danger-color);
+  color: var(--crm-danger-text-color);
+}
+#bootstrap-theme li.bg-danger > a,
+#bootstrap-theme .bg-danger > span > a:not(.btn),
+#bootstrap-theme .dropdown-menu .bg-danger .crm-i::before {
+  color: var(--crm-danger-text-color);
+}
+#bootstrap-theme a.bg-danger:is(:hover,:focus),
+#bootstrap-theme .dropdown-menu .bg-danger a:is(:hover,:focus),
+#bootstrap-theme .dropdown-menu a.bg-danger:is(:hover,:focus) {
+  background: color-mix(in srgb, var(--crm-danger-color) 87.5%, #000 12.5%);
+  color: var(--crm-danger-text-color);
 }
 
 /* CKEditor Config */

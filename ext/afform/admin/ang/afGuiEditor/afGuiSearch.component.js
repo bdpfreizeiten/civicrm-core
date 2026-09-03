@@ -17,8 +17,6 @@
       $scope.calcFieldTitles = [];
       $scope.blockList = [];
       $scope.blockTitles = [];
-      $scope.elementList = [];
-      $scope.elementTitles = [];
 
       $scope.getField = afGui.getField;
 
@@ -32,7 +30,6 @@
         buildCalcFieldList(search);
         buildFieldList(search);
         buildBlockList(search);
-        buildElementList(search);
       };
 
       // Gets the name of the entity a field belongs to
@@ -53,9 +50,14 @@
       };
 
       function fieldDefaults(field, prefix) {
+        let name = prefix + field.name;
+        // Use :name suffix if available (improves form portability)
+        if (field.options && Array.isArray(field.suffixes) && field.suffixes.includes('name')) {
+          name += ':name';
+        }
         const tag = {
           "#tag": "af-field",
-          name: prefix + field.name
+          name: name
         };
         if (field.input_type === 'Select' || field.input_type === 'ChainSelect') {
           tag.defn = {input_attrs: {multiple: true}};
@@ -117,25 +119,10 @@
         }
       }
 
-      function buildElementList(search) {
-        $scope.elementList.length = 0;
-        $scope.elementTitles.length = 0;
-        _.each(afGui.meta.elements, function(element, name) {
-          if (
-            (!element.afform_type || element.afform_type.includes('search')) &&
-            (!search || name.includes(search) || element.title.toLowerCase().includes(search))
-          ) {
-            const node = _.cloneDeep(element.element);
-            $scope.elementList.push(node);
-            $scope.elementTitles.push(element.title);
-          }
-        });
-      }
-
       // This gets called from jquery-ui so we have to manually apply changes to scope
       $scope.buildPaletteLists = function() {
-        $timeout(function() {
-          $scope.$apply(function() {
+        $timeout(() => {
+          $scope.$apply(() => {
             ctrl.buildPaletteLists();
           });
         });
@@ -155,7 +142,7 @@
         if (block['af-join']) {
           return !!getElement(ctrl.display.fieldset['#children'], {'af-join': block['af-join']});
         }
-        const fieldsInBlock = _.pluck(afGui.findRecursive(afGui.meta.blocks[block['#tag']].layout, {'#tag': 'af-field'}), 'name');
+        const fieldsInBlock = afGui.findRecursive(afGui.meta.blocks[block['#tag']].layout, {'#tag': 'af-field'}).map((field) => field.name);
         return !!getElement(ctrl.display.fieldset['#children'], function(item) {
           return item['#tag'] === 'af-field' && fieldsInBlock.includes(item.name);
         });

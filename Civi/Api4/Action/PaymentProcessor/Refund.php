@@ -23,7 +23,7 @@ class Refund extends \Civi\Api4\Generic\AbstractAction {
    * @var int
    * @required
    */
-  protected int $paymentProcessorID;
+  protected ?int $paymentProcessorID = NULL;
 
   /**
    * The amount to refund
@@ -31,7 +31,14 @@ class Refund extends \Civi\Api4\Generic\AbstractAction {
    * @var float
    * @required
    */
-  protected float $amountToRefund;
+  protected ?float $amountToRefund = NULL;
+
+  /**
+   * The currency of the amount to refund (Optional)
+   *
+   * @var string
+   */
+  protected string $currency = '';
 
   /**
    * The payment processor transaction ID
@@ -40,7 +47,7 @@ class Refund extends \Civi\Api4\Generic\AbstractAction {
    * @var string
    * @required
    */
-  protected string $transactionID;
+  protected ?string $transactionID = NULL;
 
   /**
    * @see \Civi\Api4\Generic\AbstractEntity::permissions()
@@ -60,8 +67,12 @@ class Refund extends \Civi\Api4\Generic\AbstractAction {
     }
     $refundParams['amount'] = $this->amountToRefund;
     $refundParams['trxn_id'] = $this->transactionID;
+    // With a trxn_id we often don't need currency at all. But some payment processors use it for formatting the requested amount etc.
+    if (!empty($this->currency)) {
+      $refundParams['currency'] = $this->currency;
+    }
 
-    $result->exchangeArray($processor->doRefund($refundParams));
+    $result->exchangeArray($processor->doRefund($refundParams) ?? []);
     return $result;
   }
 

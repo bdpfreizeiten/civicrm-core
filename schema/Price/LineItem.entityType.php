@@ -23,6 +23,38 @@ return [
       'primary_key' => TRUE,
       'auto_increment' => TRUE,
     ],
+    'created_date' => [
+      'title' => ts('Created Date'),
+      'sql_type' => 'timestamp',
+      'input_type' => 'Select Date',
+      'readonly' => TRUE,
+      'description' => ts('When was the LineItem created.'),
+      'add' => '6.16',
+      'unique_name' => 'lineitem_created_date',
+      'default' => 'CURRENT_TIMESTAMP',
+      'usage' => [
+        'export',
+      ],
+      'input_attrs' => [
+        'label' => ts('Created Date'),
+      ],
+    ],
+    'modified_date' => [
+      'title' => ts('Modified Date'),
+      'sql_type' => 'timestamp',
+      'input_type' => 'Select Date',
+      'readonly' => TRUE,
+      'description' => ts('When was the LineItem modified.'),
+      'add' => '6.16',
+      'unique_name' => 'lineitem_modified_date',
+      'default' => 'CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'usage' => [
+        'export',
+      ],
+      'input_attrs' => [
+        'label' => ts('Modified Date'),
+      ],
+    ],
     'entity_table' => [
       'title' => ts('Line Item Entity Type'),
       'sql_type' => 'varchar(64)',
@@ -108,12 +140,16 @@ return [
       'add' => '1.7',
       'input_attrs' => [
         'label' => ts('Unit Price'),
+        'control_field' => 'contribution_id.currency',
       ],
     ],
     'line_total' => [
       'title' => ts('Line Item Total'),
       'sql_type' => 'decimal(20,2)',
-      'input_type' => NULL,
+      'input_attrs' => [
+        'control_field' => 'contribution_id.currency',
+      ],
+      'input_type' => 'Text',
       'required' => TRUE,
       'description' => ts('qty * unit_price'),
       'add' => '1.7',
@@ -129,18 +165,16 @@ return [
     'price_field_value_id' => [
       'title' => ts('Option ID'),
       'sql_type' => 'int unsigned',
-      'input_type' => 'EntityRef',
+      'input_type' => 'ChainSelect',
       'description' => ts('FK to civicrm_price_field_value'),
       'add' => '3.3',
       'default' => NULL,
       'input_attrs' => [
         'label' => ts('Option'),
+        'control_field' => 'price_field_id',
       ],
       'pseudoconstant' => [
-        'table' => 'civicrm_price_field_value',
-        'key_column' => 'id',
-        'name_column' => 'name',
-        'label_column' => 'label',
+        'callback' => ['\CRM_Price_BAO_LineItem', 'getPriceFieldValueOptionsForPriceField'],
       ],
       'entity_reference' => [
         'entity' => 'PriceFieldValue',
@@ -172,6 +206,9 @@ return [
     'non_deductible_amount' => [
       'title' => ts('Non-deductible Amount'),
       'sql_type' => 'decimal(20,2)',
+      'input_attrs' => [
+        'control_field' => 'contribution_id.currency',
+      ],
       'input_type' => 'Text',
       'required' => TRUE,
       'description' => ts('Portion of total amount which is NOT tax deductible.'),
@@ -181,6 +218,9 @@ return [
     'tax_amount' => [
       'title' => ts('Tax Amount'),
       'sql_type' => 'decimal(20,2)',
+      'input_attrs' => [
+        'control_field' => 'contribution_id.currency',
+      ],
       'input_type' => 'Text',
       'required' => TRUE,
       'description' => ts('tax of each item'),

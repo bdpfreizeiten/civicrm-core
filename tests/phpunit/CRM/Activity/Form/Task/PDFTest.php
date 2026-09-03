@@ -61,7 +61,7 @@ class CRM_Activity_Form_Task_PDFTest extends CiviUnitTestCase {
     $html_message = "\n" . implode("\n", array_column($data, '0')) . "\n";
     $form = $this->getFormObject('CRM_Activity_Form_Task_PDF');
     try {
-      $output = $form->createDocument([$activity['id']], $html_message, []);
+      $form->createDocument([$activity['id']], $html_message, []);
     }
     catch (CRM_Core_Exception_PrematureExitException $e) {
       $output = $e->errorData['html'];
@@ -94,6 +94,11 @@ class CRM_Activity_Form_Task_PDFTest extends CiviUnitTestCase {
       '{activity.source_contact_id}' => 'Source Contact',
       '{activity.target_contact_id}' => 'Target Contacts',
       '{activity.assignee_contact_id}' => 'Assignee Contacts',
+      '{activity.all_contact_id}' => 'Activity Contacts',
+      '{activity.target_contact_count}' => 'Target Contact Count',
+      '{activity.assignee_contact_count}' => 'Assignee Contact Count',
+      '{activity._depth}' => 'Depth',
+      '{activity._descendents}' => 'Descendents',
     ];
   }
 
@@ -114,7 +119,7 @@ class CRM_Activity_Form_Task_PDFTest extends CiviUnitTestCase {
     $activityIds = CRM_Utils_Array::collect('id', $activities);
     $form = $this->getFormObject('CRM_Activity_Form_Task_PDF');
     try {
-      $output = $form->createDocument($activityIds, $html_message, []);
+      $form->createDocument($activityIds, $html_message, []);
     }
     catch (CRM_Core_Exception_PrematureExitException $e) {
       $output = $e->errorData['html'];

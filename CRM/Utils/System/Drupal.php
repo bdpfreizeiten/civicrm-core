@@ -100,6 +100,44 @@ class CRM_Utils_System_Drupal extends CRM_Utils_System_DrupalBase {
   }
 
   /**
+   * @inheritDoc
+   */
+  public function addUfRole(int $ufID, string $role): bool {
+    $user = user_load($ufID);
+    if (!$user) {
+      return FALSE;
+    }
+    $rid = array_search($role, user_roles());
+    if ($rid === FALSE) {
+      return FALSE;
+    }
+    if (!isset($user->roles[$rid])) {
+      user_save($user, ['roles' => $user->roles + [$rid => $role]]);
+    }
+    return TRUE;
+  }
+
+  /**
+   * @inheritDoc
+   */
+  public function removeUfRole(int $ufID, string $role): bool {
+    $user = user_load($ufID);
+    if (!$user) {
+      return FALSE;
+    }
+    $rid = array_search($role, user_roles());
+    if ($rid === FALSE) {
+      return FALSE;
+    }
+    if (isset($user->roles[$rid])) {
+      $roles = $user->roles;
+      unset($roles[$rid]);
+      user_save($user, ['roles' => $roles]);
+    }
+    return TRUE;
+  }
+
+  /**
    * @inheritdoc
    */
   public function checkUserNameEmailExists(&$params, &$errors, $emailName = 'email') {
@@ -704,68 +742,6 @@ AND    u.status = 1
     }
 
     return $url;
-  }
-
-  /**
-   * Find any users/roles/security-principals with the given permission
-   * and replace it with one or more permissions.
-   *
-   * @param string $oldPerm
-   * @param array $newPerms
-   *   Array, strings.
-   */
-  public function replacePermission($oldPerm, $newPerms) {
-    $roles = user_roles(FALSE, $oldPerm);
-    if (!empty($roles)) {
-      foreach (array_keys($roles) as $rid) {
-        user_role_revoke_permissions($rid, [$oldPerm]);
-        user_role_grant_permissions($rid, $newPerms);
-      }
-    }
-  }
-
-  /**
-   * Wrapper for og_membership creation.
-   *
-   * @param int $ogID
-   *   Organic Group ID.
-   * @param int $drupalID
-   *   Drupal User ID.
-   */
-  public function og_membership_create($ogID, $drupalID) {
-    if (function_exists('og_entity_query_alter')) {
-      // sort-of-randomly chose a function that only exists in the // 7.x-2.x branch
-      //
-      // @TODO Find more solid way to check - try system_get_info('module', 'og').
-      //
-      // Also, since we don't know how to get the entity type of the // group, we'll assume it's 'node'
-      og_group('node', $ogID, ['entity' => user_load($drupalID)]);
-    }
-    else {
-      // Works for the OG 7.x-1.x branch
-      og_group($ogID, ['entity' => user_load($drupalID)]);
-    }
-  }
-
-  /**
-   * Wrapper for og_membership deletion.
-   *
-   * @param int $ogID
-   *   Organic Group ID.
-   * @param int $drupalID
-   *   Drupal User ID.
-   */
-  public function og_membership_delete($ogID, $drupalID) {
-    if (function_exists('og_entity_query_alter')) {
-      // sort-of-randomly chose a function that only exists in the 7.x-2.x branch
-      // TODO: Find a more solid way to make this test
-      // Also, since we don't know how to get the entity type of the group, we'll assume it's 'node'
-      og_ungroup('node', $ogID, 'user', user_load($drupalID));
-    }
-    else {
-      // Works for the OG 7.x-1.x branch
-      og_ungroup($ogID, 'user', user_load($drupalID));
-    }
   }
 
   /**

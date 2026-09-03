@@ -10,6 +10,7 @@
  */
 
 use Civi\Api4\Contribution;
+use Civi\Api4\ContributionRecur;
 use Civi\Api4\Generic\Result;
 use Civi\Api4\LineItem;
 use Civi\Api4\PriceField;
@@ -30,6 +31,7 @@ use Civi\Api4\PriceSet;
  * may change.
  *
  * @internal
+ *
  */
 class CRM_Financial_BAO_Order {
 
@@ -85,6 +87,20 @@ class CRM_Financial_BAO_Order {
   private array $contributionValues;
 
   private ?int $existingContributionID = NULL;
+
+  /**
+   * Values that should be used to create a ContributionRecur.
+   * A ContributionRecur will be created if at least frequency_unit is set
+   *
+   * @var array
+   */
+  private array $contributionRecurValues;
+
+  /**
+   * The existing ContributionRecur ID if there is one
+   * @var int|null
+   */
+  private ?int $existingContributionRecurID = NULL;
 
   /**
    * @param bool $isExcludeExpiredFields
@@ -302,7 +318,7 @@ class CRM_Financial_BAO_Order {
   /**
    * Add a line item to an entity.
    *
-   * The v3 api supports more than on line item being stored against a given
+   * The v3 api supports more than one line item being stored against a given
    * set of entity parameters. There is some doubt as to whether this is a
    * good thing that should be supported in v4 or something that 'seemed
    * like a good idea at the time' - but this allows the lines to be added from the
@@ -563,7 +579,8 @@ class CRM_Financial_BAO_Order {
    *
    */
   protected function setPriceSetIDByEntity(string $entity, int $id): void {
-    $this->priceSetID = CRM_Price_BAO_PriceSet::getFor('civicrm_' . $entity, $id);
+    $tableName = CRM_Core_DAO_AllCoreTables::getTableForEntityName(CRM_Core_DAO_AllCoreTables::convertEntityNameToCamel($entity));
+    $this->priceSetID = CRM_Price_BAO_PriceSet::getFor($tableName, $id);
   }
 
   /**
@@ -722,6 +739,9 @@ class CRM_Financial_BAO_Order {
             unset($metadata[$index]['options'][$optionID]);
           }
           elseif (!empty($option['membership_type_id'])) {
+            if (!CRM_Core_Component::isEnabled('CiviMember')) {
+              throw new CRM_Core_Exception('Price set is configured for CiviMember but CiviMember is disabled. Please enable CiviMember to use it');
+            }
             $membershipType = CRM_Member_BAO_MembershipType::getMembershipType((int) $option['membership_type_id']);
             $metadata[$index]['options'][$optionID]['membership_type_id.auto_renew'] = (int) $membershipType['auto_renew'];
             $metadata[$index]['supports_auto_renew'] = $metadata[$index]['supports_auto_renew'] ?? $membershipType['auto_renew'] ?: (bool) $membershipType['auto_renew'];
@@ -757,7 +777,7 @@ class CRM_Financial_BAO_Order {
     return $this->priceSetMetadata;
   }
 
-  public function isMembershipPriceSet() {
+  public function isMembershipPriceSet(): bool {
     if (!CRM_Core_Component::isEnabled('CiviMember')) {
       return FALSE;
     }
@@ -848,7 +868,7 @@ class CRM_Financial_BAO_Order {
    *
    * @throws \CRM_Core_Exception
    */
-  public function getLineItems():array {
+  public function getLineItems(): array {
     if (empty($this->lineItems)) {
       $this->lineItems = $this->calculateLineItems();
     }
@@ -1045,7 +1065,11 @@ class CRM_Financial_BAO_Order {
       if ($this->getOverrideTotalAmount() !== FALSE) {
         $this->addTotalsToLineBasedOnOverrideTotal((int) $lineItem['financial_type_id'], $lineItem);
       }
-      elseif ($this->getPriceFieldMetadata($lineItem['price_field_id'])['name'] === 'other_amount') {
+      elseif ($this->getPriceFieldMetadata($lineItem['price_field_id'])['name'] === 'other_amount'
+        // If we are loading an existing contribution then this switcheroo to treat the amount set
+        // as being the inclusive amount has already been done, so skip.
+        && !$this->getExistingContributionID() && !$this->getTemplateContributionID()
+      ) {
         // Other amount is a front end user entered form. It is reasonable to think it would be tax inclusive.
         $lineItem['line_total_inclusive'] = $lineItem['line_total'];
         $lineItem['line_total'] = $lineItem['line_total_inclusive'] ? $lineItem['line_total_inclusive'] / (1 + ($lineItem['tax_rate'] / 100)) : 0;
@@ -1301,7 +1325,9 @@ class CRM_Financial_BAO_Order {
    */
   public function getLineItemEntity($index):string {
     // @todo - ensure entity_table is set in setLineItem, go back to enotices here.
-    return str_replace('civicrm_', '', ($this->lineItems[$index]['entity_table'] ?? 'contribution'));
+    return \CRM_Core_DAO_AllCoreTables::convertEntityNameToLower(
+      \CRM_Core_DAO_AllCoreTables::getEntityNameForTable($this->lineItems[$index]['entity_table'] ?? 'civicrm_contribution')
+    );
   }
 
   /**
@@ -1429,6 +1455,26 @@ class CRM_Financial_BAO_Order {
   }
 
   /**
+   * Get the constructed line items formatted for the v3 Order api.
+   *
+   * @return array
+   *
+   * @internal core tested code only.
+   *
+   * @throws \CRM_Core_Exception
+   */
+  public function getLineItemsForV4OrderApi(): array {
+    $lineItems = [];
+    foreach ($this->getLineItems() as $key => $line) {
+      foreach ($this->entityParameters[$key] as $fieldName => $entityParameter) {
+        $line['entity_id.' . $fieldName] = $entityParameter;
+      }
+      $lineItems[] = $line;
+    }
+    return $lineItems;
+  }
+
+  /**
    * @return array
    * @throws \CRM_Core_Exception
    * @throws \Civi\API\Exception\UnauthorizedException
@@ -1519,29 +1565,136 @@ class CRM_Financial_BAO_Order {
   }
 
   /**
+   * Set the values for the ContributionRecur
+   *
+   * @param array $contributionRecurValues
+   *
+   * @return void
+   */
+  public function setContributionRecurValues(array $contributionRecurValues) {
+    $this->contributionRecurValues = $contributionRecurValues;
+  }
+
+  /**
    * @param array $contributionValues
    *
-   * @return \Civi\Api4\Generic\Result
+   * @return void
+   */
+  public function setContributionValues(array $contributionValues) {
+    $this->contributionValues = $contributionValues;
+  }
+
+  /**
+   *  Calculate additional/automatic/required parameters for ContributionRecur
+   *
+   * @return void
+   * @throws \CRM_Core_Exception
+   * @throws \Civi\API\Exception\UnauthorizedException
+   */
+  private function calculateContributionRecurValues() {
+    if (!$this->getExistingContributionRecurID()) {
+      if (empty($this->contributionRecurValues)) {
+        // We are not creating a ContributionRecur. That is ok.
+        return;
+      }
+      if (empty($this->contributionRecurValues['frequency_unit'])) {
+        throw new CRM_Core_Exception('Order Create: Cannot create a recurring contribution without specifying frequency_unit');
+      }
+      if (empty($this->contributionRecurValues['frequency_interval'])) {
+        $this->contributionRecurValues['frequency_interval'] = 1;
+      }
+
+      // For a recur, the only mandatory (ie. no defaults) params are amount, contact_id
+      $this->contributionRecurValues['contact_id'] = $this->contributionRecurValues['contact_id'] ?? $this->contributionValues['contact_id'] ?? 'user_contact_id';
+      $this->contributionRecurValues['amount'] = $this->getTotalAmount();
+      // We set financialType because Order API has code to set the default for a Contribution
+      if (empty($this->contributionRecurValues['financial_type_id'])) {
+        $this->contributionRecurValues['financial_type_id'] = $this->getDefaultFinancialTypeID();
+      }
+    }
+  }
+
+  /**
+   * Calculate additional/automatic/required parameters for Contribution
+   *
+   * @return void
+   * @throws \CRM_Core_Exception
+   */
+  private function calculateContributionValues() {
+    $this->contributionValues['total_amount'] = $this->getTotalAmount();
+    $this->contributionValues['tax_amount'] = $this->getTotalTaxAmount();
+    $this->contributionValues['amount_level'] = $this->contributionValues['amount_level'] ?? $this->getAmountLevel();
+    $this->contributionValues['contribution_status_id:name'] = 'Pending';
+    if ($this->getExistingContributionRecurID()) {
+      $this->contributionValues['contribution_recur_id'] = $this->getExistingContributionRecurID();
+    }
+    // If we specify a future start_date for recur, the Contribution should also use that date (unless overridden)
+    // @todo: Maybe we should also make it a template contribution?
+    if (isset($this->contributionRecurValues['start_date']) && !isset($this->contributionValues['receive_date'])) {
+      $this->contributionValues['receive_date'] = $this->contributionRecurValues['start_date'];
+    }
+  }
+
+  /**
+   * @return $this
+   *
+   * @internal Access through apiv4 Order api only. Signature subject to change.
+   *
+   * @throws \CRM_Core_Exception
+   * @throws \Civi\API\Exception\UnauthorizedException
+   */
+  public function validate(): CRM_Financial_BAO_Order {
+    // First we calculate remaining parameters for Contribution/ContributionRecur
+    $this->calculateContributionRecurValues();
+    $this->calculateContributionValues();
+    // Then we get/calculate the lineitems - they won't have related entity IDs Membership/Participant etc. for new records.
+    $this->getLineItems();
+    return $this;
+  }
+
+  /**
+   * @return array
    *
    * @internal Access through apiv4 Order api only. Signature subject to change.
    *
    * @throws \CRM_Core_Exception
    */
-  public function save(array $contributionValues): Result {
-    $this->contributionValues = $contributionValues;
+  public function save(): Result {
+    // Now we must save/create a ContributionRecur before we create related entity IDs because ContributionRecurID is
+    //   linked to some related entities, eg. Membership.
+    $this->saveContributionRecur();
     foreach ($this->getLineItems() as $index => $lineItem) {
       // Save entities first, so we can get the Entity ID.
       if ($lineItem['entity_table'] !== 'civicrm_contribution') {
         $this->setLineItemValue('entity_id', $this->saveLineItemEntity($lineItem), $index);
       }
     }
-    $contributionValues['total_amount'] = $this->getTotalAmount();
-    $contributionValues['tax_amount'] = $this->getTotalTaxAmount();
-    $contributionValues['amount_level'] = $this->getAmountLevel();
-    $contributionValues['contribution_status_id:name'] = 'Pending';
-    $contributionValues['line_item'] = [$this->getLineItems()];
+    $this->contributionValues['line_item'] = [$this->getLineItems()];
+
     return Contribution::create(FALSE)
-      ->setValues($contributionValues)->execute();
+      ->setValues($this->contributionValues)->execute();
+  }
+
+  /**
+   * This will create a ContributionRecur if (at least) frequency_unit is set in $this->contributionRecurValues
+   *
+   * @return void
+   * @throws \CRM_Core_Exception
+   * @throws \Civi\API\Exception\UnauthorizedException
+   */
+  private function saveContributionRecur(): void {
+    if (!$this->getExistingContributionRecurID()) {
+      if (empty($this->contributionRecurValues)) {
+        // We are not creating a ContributionRecur. That is ok.
+        return;
+      }
+
+      $contributionRecur = ContributionRecur::create(FALSE)
+        ->setValues($this->contributionRecurValues)
+        ->execute()
+        ->single();
+      $this->setExistingContributionRecurID($contributionRecur['id']);
+    }
   }
 
   /**
@@ -1563,11 +1716,19 @@ class CRM_Financial_BAO_Order {
     if (empty($entityValues['id'])) {
       // Not an update, include any relevant values (e.g. contact_id) from the contribution
       // entity values if not present already in EntityFields.
-      $fields = (array) civicrm_api4($entity, 'getfields')->indexBy('name');
+      $fields = (array) civicrm_api4($entity, 'getfields', ['checkPermissions' => FALSE])->indexBy('name');
       $carryOverFields = array_intersect_key($this->contributionValues, $fields);
+      if ($entity === 'Participant') {
+        $carryOverFields += array_filter(['fee_amount' => $lineItem['unit_price'], 'fee_level' => $lineItem['label']]);
+      }
       $entityValues += $carryOverFields;
 
       if ($entity === 'Membership') {
+        // If we have a recurring contribution link it to the membership.
+        if (empty($entityValues['contribution_recur_id']) && $this->getExistingContributionRecurID()) {
+          $entityValues['contribution_recur_id'] = $this->getExistingContributionRecurID();
+        }
+
         // We can pass in API4 pseudoconstant, eg. membership_type_id:name but that will be overridden if we
         //   also pass in membership_type_id on the lineItem.
         // membership_type_id is a special-case because it has it's own field on PriceFieldValue.
@@ -1596,14 +1757,7 @@ class CRM_Financial_BAO_Order {
         if (empty($statusIDKey) || empty($entityValues[$statusIDKey])) {
           // For the Membership entity, we didn't pass in a value for "status" so we are going to calculate membership status
           //   from membership dates and membership type.
-          $entityValues['status_id'] = CRM_Member_BAO_MembershipStatus::getMembershipStatusByDate(
-            $entityValues['start_date'] ?? NULL,
-            $entityValues['end_date'] ?? NULL,
-            $entityValues['join_date'] ?? NULL,
-            $this->contributionValues['receive_date'],
-            TRUE,
-            $entityValues['membership_type_id']
-          )['id'];
+          $entityValues['status_id:name'] = 'Pending';
         }
       }
     }
@@ -1617,12 +1771,38 @@ class CRM_Financial_BAO_Order {
     ])->first()['id'];
   }
 
+  /**
+   * @return int|null
+   */
   public function getExistingContributionID(): ?int {
     return $this->existingContributionID;
   }
 
+  /**
+   * @param int|null $existingContributionID
+   *
+   * @return void
+   */
   public function setExistingContributionID(?int $existingContributionID): void {
     $this->existingContributionID = $existingContributionID;
+  }
+
+  /**
+   * @return int|null
+   */
+  public function getExistingContributionRecurID(): ?int {
+    return $this->existingContributionRecurID;
+  }
+
+  /**
+   * @param int|null $existingContributionRecurID
+   *
+   * @return void
+   */
+  public function setExistingContributionRecurID(?int $existingContributionRecurID): void {
+    $this->existingContributionRecurID = $existingContributionRecurID;
+    // Also set the value on the Contribution
+    $this->contributionValues['contribution_recur_id'] = $existingContributionRecurID;
   }
 
   /**
